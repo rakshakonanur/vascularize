@@ -1,9 +1,12 @@
+import sys
+sys.path.insert(0, "../clones/svVascularize")
 import pyvista as pv
 import svv
 from svv.domain.domain import Domain
 from svv.tree.tree import Tree
 from svv.forest.forest import Forest
 from svv.tree.data.data import TreeParameters
+import inspect
 from svv.simulation.simulation import Simulation
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -16,7 +19,6 @@ from time import perf_counter
 from datetime import datetime
 import os
 import vtk
-import sys
 import subprocess
 
 class CFD:
@@ -60,6 +62,10 @@ class CFD:
         root = self.parameters['inlet'].reshape(1,-1)
         direction = self.parameters['inlet_normal']
         num_branches = self.parameters['num_branches']
+        print("TreeParameters ref:", TreeParameters)
+        print("Defined in module:", getattr(TreeParameters, "__module__", "?"))
+        print("Signature:", inspect.signature(TreeParameters))
+        print("Source file:", inspect.getsourcefile(TreeParameters))
         params = TreeParameters(terminal_pressure=20.0*1333.22,
                                 root_pressure=35.0*1333.22,
                                 terminal_flow=0.05/60)
@@ -84,12 +90,12 @@ class CFD:
         num_branches = self.parameters['num_branches']
         outdir = self.parameters['outdir']
         folder = self.parameters['outdir'] + os.sep + self.parameters['folder'] + os.sep
-        cerm_forest = Forest(n_networks=number_of_networks, n_trees_per_network=trees_per_network)
+        cerm_forest = Forest(n_networks=number_of_networks, n_trees_per_network=trees_per_network) 
         cerm_forest.set_domain(cermSurf)
-        params_inlet = TreeParameters(terminal_pressure=20.0*1333.22,
+        params_inlet = TreeParameters(terminal_pressure=25.0*1333.22,
                         root_pressure=35.0*1333.22,
                         terminal_flow=0.05/60)
-        params_outlet = TreeParameters(terminal_pressure=20.0*1333.22,
+        params_outlet = TreeParameters(terminal_pressure=25.0*1333.22,
                         root_pressure=35.0*1333.22,
                         terminal_flow=0.05/60)
         # for i in range(number_of_networks):
@@ -310,6 +316,7 @@ class CFD:
         terminal_pressure = 20.0  # mmHg, change as needed
 
         pressure_val = terminal_pressure * 1333.22
+        outlet_pressure = 5.0 * 1333.22  # Convert mmHg to dyn/cm^2
 
         # --- Read original file ---
         with open(fileName, "r") as file:
@@ -328,9 +335,9 @@ class CFD:
                 parts = line.split()
                 if len(parts) > 5 and parts[4] == "5":
                     parts[4] = "100"
-                # Replace RCR RCR_* with PRESSURE PRES_IN
+                # Replace RCR RCR_* with PRESSURE PRES_BC
                 line = " ".join(parts) + "\n"
-                line = re.sub(r"RCR\s+RCR_\S+", "PRESSURE PRES_IN", line)
+                line = re.sub(r"RCR\s+RCR_\S+", "PRESSURE PRES_BC", line)
                 seen_segment = True
 
             new_lines.append(line)
@@ -343,7 +350,7 @@ class CFD:
                 i == len(new_lines) - 1 or not new_lines[i + 1].startswith("SEGMENT")
             ):
                 if seen_segment:
-                    out_lines.append("DATATABLE PRES_IN LIST\n")
+                    out_lines.append("DATATABLE PRES_BC LIST\n")
                     out_lines.append(f" 0.000000 {pressure_val:.4f}\n")
                     out_lines.append("ENDDATATABLE\n")
 
@@ -351,7 +358,7 @@ class CFD:
         final_lines = []
         inside_inflow = False
         for line in out_lines:
-            if line.strip().startswith("DATATABLE INFLOW LIST"):
+            if line.strip().startswith("DATATABLE PRES_IN LIST"):
                 inside_inflow = True
                 final_lines.append(line)
                 continue
@@ -365,7 +372,7 @@ class CFD:
                         t, val = parts
                         try:
                             val = float(val)
-                            final_lines.append(f" {t} {-abs(val):.6f}\n")
+                            final_lines.append(f" {t} {outlet_pressure:.6f}\n")
                         except ValueError:
                             final_lines.append(line)
                     else:
