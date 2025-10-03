@@ -17,3 +17,6 @@ __pycache__/
 *.msh
 *.geo
 *.pvtu
+src/solves/darcy_BDM.py
+src/solves/darcy_P1.py
+src/solves/generate_1d_deck.py
