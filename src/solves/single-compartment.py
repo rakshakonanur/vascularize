@@ -58,7 +58,7 @@ def import_mesh(xdmf_file: str):
 
     return mesh, mesh_tags
 
-def import_pressure_data(self, pres_file: str):
+def import_pressure_data(self, pres_file: str, k: int = 1):
     """
     Import pressure data from an XDMF file.
     """
@@ -74,11 +74,18 @@ def import_pressure_data(self, pres_file: str):
         p_src.x.scatter_forward()
         p_series.append(p_src.copy())
 
+    DG1 = fem.functionspace(self.mesh, element("DG", self.mesh.basix_cell(), k))
+    for i in range(len(p_series)):
+        p_tmp = fem.Function(DG1)
+        p_tmp.interpolate(p_series[i])
+        p_series[i] = p_tmp 
+
     # with io.XDMFFile(MPI.COMM_WORLD, "out_mixed_poisson/import_p_src.xdmf", "w") as file:
     #     file.write_mesh(self.mesh)
     #     file.write_function(p_series[-1])
 
     print(f"Imported {len(p_series)} time steps from {pres_file}", flush=True)
+    print(f"Min/Max pressure in last time step: {np.min(p_series[-1].x.array)}/{np.max(p_series[-1].x.array)}", flush=True)
     return p_series
 
 def import_flow_data(self, flow_file: str):
@@ -93,17 +100,17 @@ def import_flow_data(self, flow_file: str):
     q_series = []
     for t in ts:
         adios4dolfinx.read_function(flow_file, q_src, name="q_src_density", time=t)
-        q_src.x.array[:] = q_src.x.array       
+        q_src.x.array[:] = q_src.x.array      
         q_src.x.scatter_forward()
         q_series.append(q_src.copy())
 
-    # with io.XDMFFile(MPI.COMM_WORLD, "out_mixed_poisson/import_q_src.xdmf", "w") as file:
-    #     file.write_mesh(self.mesh)
-    #     file.write_function(q_series[-1])
+    with io.XDMFFile(MPI.COMM_WORLD, current_dir/"out_darcy/import_q_src.xdmf", "w") as file:
+        file.write_mesh(self.mesh)
+        file.write_function(q_series[-1])
 
     print(f"Imported {len(q_series)} time steps from {flow_file}", flush=True)
-    print(f"Max flow rate in last time step: {np.max(q_series[-1].x.array)}", flush=True)
-    return np.max(q_series[-1].x.array)
+    print(f"Total flow rate in last time step: {np.sum(np.unique(q_series[-1].x.array))}", flush=True)
+    return np.sum(np.unique(q_series[-1].x.array))
 
 
 def _cell_volumes_Q0(mesh) -> np.ndarray:
@@ -266,23 +273,19 @@ class PerfusionSolver:
         Initialize the PerfusionSolver with a given STL file and branching data.
         """
         self.D_value = 1e-2
-        self.element_degree = 1
         self.write_output = True
+        self.element_degree = 1
         self.mesh, self.cell_tags = import_mesh(mesh_tag_file)
-        self.p_src = import_pressure_data(self, pres_file)
+        self.p_src = import_pressure_data(self, pres_file, k=self.element_degree-1)
         self.flow = import_flow_data(self, flow_file)
-
-        self.t = 0
-        self.dt = 1  # Time step size, can be adjusted as needed
-        self.T = len(self.p_src)  # Total simulation time, can be adjusted as needed
 
     def setup(self, init: bool = True):
         ''' Setup the solver. '''
         
         fdim = self.mesh.topology.dim -1 
         
-        # k = self.element_degree
-        k = 1
+        k = self.element_degree
+        deg = 2*k + 1
         P_el = element("DG", self.mesh.basix_cell(), k-1)
         u_el = element("BDM", self.mesh.basix_cell(), k, shape=(self.mesh.geometry.dim,))
         M_el = mixed_element([P_el, u_el])
@@ -294,14 +297,18 @@ class PerfusionSolver:
         (p, u) = ufl.TrialFunctions(M) # Trial functions for pressure and velocity
         (v, w) = ufl.TestFunctions(M) # Test functions for pressure and velocity
 
-        dx = Measure("dx", self.mesh) # Cell integrals
+        dx = Measure("dx", self.mesh, metadata={"quadrature_degree": deg}) # Cell integrals
+        self.ds = Measure("ds", self.mesh, metadata={"quadrature_degree": deg}) # Facet integrals
+        n = FacetNormal(self.mesh) # Normal vector on facets
 
         kappa = 2e-5 / 10 # convert from cm^2/(Pa s) to cm^2/(dyne s)
         mu = 1
-        kappa_over_mu = fem.Constant(self.mesh, dfx.default_scalar_type(kappa/mu))
+        kappa_over_mu = dfx.default_scalar_type(kappa/mu)
+        Kinv  = fem.Constant(self.mesh, kappa_over_mu**-1)
         hf = ufl.CellDiameter(self.mesh) # Cell diameter
         nitsche = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(100.0)) # Nitsche parameter
         nitsche_outflow = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(10000.0)) # Nitsche parameter
+        S = fem.Constant(self.mesh, dfx.default_scalar_type(0.0)) # Source term
 
         # Zero flux on boundaries is default for BDM elements, so no need to explicitly impose
 
@@ -317,11 +324,16 @@ class PerfusionSolver:
             Psnk = dfx.fem.Constant(self.mesh, PETSc.ScalarType(0.0))
 
         print(f"Length of p_src:", len(self.p_src[-1].x.array), flush=True)
+        print(f"Mean of p_src:", np.mean(self.p_src[-1].x.array), flush=True)
+        print(f"Beta_src (1/s): {float(beta_src.value)}", flush=True)
+        print(f"Beta_snk (1/s): {float(beta_snk.value)}", flush=True)
         fLHS = p * (beta_snk + beta_src) 
         fRHS = beta_src * self.p_src[-1] + beta_snk * Psnk
 
-        a = inner(u, w) * dx - inner(kappa_over_mu*p, div(w)) * dx + inner(div(u), v) * dx + inner(fLHS, v) * dx
-        L = inner(fRHS, v) * dx 
+        a = Kinv * inner(u, w) * dx - inner(p, div(w)) * dx + inner(div(u), v) * dx  + inner(fLHS, v) * dx  + ufl.inner(p, ufl.dot(w, n)) * self.ds
+        # a = Kinv * inner(u, w) * dx + inner(grad(p), w) * dx + inner(div(u), v) * dx  + inner(fLHS, v) * dx
+        L = inner(fRHS, v) * dx + inner(S, v) * dx
+        # # L = -inner(S, v) * ufl.dx  # residual form of our equation
 
         self.a = a
         self.L = L
@@ -342,6 +354,7 @@ class PerfusionSolver:
                 raise e
 
         p_h, u_h = w_h.split()
+        print("pressure min/max:", float(p_h.x.array.min()), float(p_h.x.array.max()))
         print("Len of p_h:", len(p_h.x.array))
     
         Q0 = fem.functionspace(self.mesh, element("DG", self.mesh.basix_cell(), 0))
@@ -357,7 +370,7 @@ class PerfusionSolver:
 
         with io.XDMFFile(self.mesh.comm, str(current_dir / "out_mixed_poisson/p.xdmf"), "w") as file:
             file.write_mesh(self.mesh)
-            file.write_function(p_h)
+            file.write_function(p_in)
 
         with io.XDMFFile(self.mesh.comm, str(current_dir / "out_mixed_poisson/u.xdmf"), "w") as file:
             file.write_mesh(self.mesh)
