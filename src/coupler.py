@@ -200,13 +200,13 @@ def run_darcy(paths: Paths, init: bool, run_i: int):
     (We import by path so we can pass init flag.)
     After solve, copy mbf outputs into coupled/run_{run_i}/.
     """
-    sc_path = paths.solves / "single-compartment.py"
+    sc_path = paths.solves / "darcy_P1.py"
     if not sc_path.exists():
         _die(f"Missing {sc_path}")
-    mod = _load_module_from_path("single_compartment_mod", sc_path)
+    mod = _load_module_from_path("darcy_P1_mod", sc_path)
     PerfusionSolver = getattr(mod, "PerfusionSolver", None)
     if PerfusionSolver is None:
-        _die("single-compartment.py does not define class 'PerfusionSolver'")
+        _die("darcy_P1.py does not define class 'PerfusionSolver'")
     mesh_file = str(paths.voronoi / "territories.xdmf")
     pres_file  = str(paths.voronoi / "p_src_series.bp")
     vel_file  = str(paths.voronoi / "q_src_series.bp")
@@ -214,8 +214,8 @@ def run_darcy(paths: Paths, init: bool, run_i: int):
     solver.setup(init=bool(init))
     print("[ok] Perfusion solve complete.", flush=True)
     # Copy mbf outputs into current run folder
-    mbf_x = paths.solves / "out_mixed_poisson" / "mbf.xdmf"
-    mbf_bp = paths.solves / "out_mixed_poisson" / "mbf.bp"
+    mbf_x = paths.solves / "out_darcy" / "mbf.xdmf"
+    mbf_bp = paths.solves / "out_darcy" / "mbf.bp"
     run_dir = paths.coupled / f"run_{run_i}"
     run_dir.mkdir(parents=True, exist_ok=True)
     if mbf_x.exists():
@@ -241,9 +241,9 @@ def compare_q(mesh_file, paths: Paths, eps: float) -> tuple[float, dict]:
     q_src = paths.voronoi / "q_src_series.bp"
     if not q_src.exists():
         _die("q_src_series.bp not found in voronoi/")
-    mbf_bp = paths.solves / "out_mixed_poisson" / "mbf.bp"
+    mbf_bp = paths.solves / "out_darcy" / "mbf.bp"
     if not mbf_bp.exists():
-        _die("Missing solves/out_mixed_poisson/mbf.bp")
+        _die("Missing solves/out_darcy/mbf.bp")
 
     with XDMFFile(MPI.COMM_WORLD, mesh_file, "r") as xdmf:
         mesh = xdmf.read_mesh(name="Grid")
@@ -270,7 +270,7 @@ def update_resistances(paths: Paths, run_i: int, run_next: int):
         sys.executable, str(script),
         "--territories-xdmf", str(paths.voronoi / "territories.xdmf"),
         "--p-src-bp",         str(paths.voronoi / "p_src_series.bp"),
-        "--mbf-bp",           str(paths.solves / "out_mixed_poisson" / "mbf.bp"),
+        "--mbf-bp",           str(paths.solves / "out_darcy" / "mbf.bp"),
         "--card-in",          str(paths.coupled / f"run_{run_i}" / "inlet" / "1d_simulation_input.json"),
         "--card-out",         str(paths.coupled / f"run_{run_next}" / "inlet" / "1d_simulation_input.json"),
     ]
@@ -385,7 +385,7 @@ def main():
         run_1d_solver(args.one_d_solver_cmd, paths, run_next=k+1)
 
     print("\n[done] See 'coupled/convergence.csv' and 'coupled/convergence.png' for progress.")
-    print("      Latest 1D inputs are in 'coupled/run_{k}/inlet/' and mbf outputs in 'solves/out_mixed_poisson/'.", flush=True)
+    print("      Latest 1D inputs are in 'coupled/run_{k}/inlet/' and mbf outputs in 'solves/out_darcy/'.", flush=True)
 
 if __name__ == "__main__":
     main()
