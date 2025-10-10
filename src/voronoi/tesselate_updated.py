@@ -547,8 +547,10 @@ def assign_and_write_sources(
     vtx_pres.close()
     vtx_flow.close()
 
-    if verbose and rank == 0:
-        print(f"[done] wrote {len(ts)} timesteps to:\n  - {out_bp_p_src}\n  - {out_bp_q_src}")
+    tdim = mesh_3d.topology.dim
+    ncells = mesh_3d.topology.index_map(tdim).size_local
+    cells_painted = np.count_nonzero(p_src_func.x.array > 0)
+    print(f"painted {cells_painted}/{ncells} cells ({100*cells_painted/ncells:.1f}%) with p_src")
 
 
 if __name__ == "__main__":
