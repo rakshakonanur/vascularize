@@ -382,6 +382,8 @@ def assign_and_write_sources(
     bp_mesh_1d: str,
     bp_pressure_1d: str,
     bp_flow_1d: str,
+    viz_pressure_bp: str,
+    viz_flow_bp: str,
     out_bp_p_src: str = "p_src_series.bp",
     out_bp_q_src: str = "q_src_series.bp",
     node_match_tol: float = 1e-6,
@@ -467,8 +469,8 @@ def assign_and_write_sources(
     q_src_func = fem.Function(Q0, name=fname_out_q)# may need to switch V1 later
 
     # Optional VTX writers (you had these):
-    vtx_pres = dfx.io.VTXWriter(MPI.COMM_WORLD, current_dir/"pressure.bp", [p_src_func], engine="BP4")
-    vtx_flow = dfx.io.VTXWriter(MPI.COMM_WORLD, current_dir/"flow.bp",     [q_src_func], engine="BP4")
+    vtx_pres = dfx.io.VTXWriter(MPI.COMM_WORLD, current_dir/viz_pressure_bp, [p_src_func], engine="BP4")
+    vtx_flow = dfx.io.VTXWriter(MPI.COMM_WORLD, current_dir/viz_flow_bp, [q_src_func], engine="BP4")
     vtx_pres.write(0.0)
     vtx_flow.write(0.0)
 
@@ -556,19 +558,30 @@ def assign_and_write_sources(
 if __name__ == "__main__":
     # Optional CLI defaults; change these paths as needed
     import os
-    csv_path   = os.environ.get("SEEDS_CSV", "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/093025/Run3_10branches/branchingData_0.csv")
-    terr_xdmf  = os.environ.get("TERRITORIES_XDMF", "territories.xdmf")
-    mesh_bp    = os.environ.get("MESH_BP", "../geometry/tagged_branches.bp")
-    p1d_bp     = os.environ.get("PRESSURE_BP", "../geometry/pressure_checkpoint.bp")
-    u1d_bp     = os.environ.get("FLOW_BP",     "../geometry/flow_checkpoint.bp")
-    out_p_bp   = os.environ.get("OUT_P_SRC_BP", "p_src_series.bp")
-    out_q_bp   = os.environ.get("OUT_Q_SRC_BP", "q_src_series.bp")
+    csv_inlet_path   = os.environ.get("SEEDS_INLET_CSV", "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/branchingData_0.csv")
+    csv_outlet_path  = os.environ.get("SEEDS_OUTLET_CSV", "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/branchingData_1.csv") 
+    terr_inlet_xdmf  = os.environ.get("TERRITORIES_INLET_XDMF", "territories_inlet.xdmf")
+    terr_outlet_xdmf = os.environ.get("TERRITORIES_OUTLET_XDMF", "territories_outlet.xdmf") 
+    mesh_inlet_bp    = os.environ.get("MESH_INLET_BP", "../geometry/tagged_branches_inlet.bp")
+    mesh_outlet_bp   = os.environ.get("MESH_OUTLET_BP", "../geometry/tagged_branches_outlet.bp")  
+    p1d_inlet_bp     = os.environ.get("PRESSURE_INLET_BP", "../geometry/pressure_checkpoint_inlet.bp")
+    p1d_outlet_bp    = os.environ.get("PRESSURE_OUTLET_BP", "../geometry/pressure_checkpoint_outlet.bp")  
+    u1d_inlet_bp     = os.environ.get("FLOW_INLET_BP",     "../geometry/flow_checkpoint_inlet.bp")
+    u1d_outlet_bp    = os.environ.get("FLOW_OUTLET_BP",    "../geometry/flow_checkpoint_outlet.bp")
+    viz_inlet_pressure_bp   = os.environ.get("VIZ_INLET_BP", "pressure_inlet.bp")
+    viz_outlet_pressure_bp  = os.environ.get("VIZ_OUTLET_BP", "pressure_outlet.bp")
+    viz_inlet_flow_bp       = os.environ.get("VIZ_INLET_FLOW_BP", "flow_inlet.bp")
+    viz_outlet_flow_bp      = os.environ.get("VIZ_OUTLET_FLOW_BP", "flow_outlet.bp")
+    out_p_inlet_bp   = os.environ.get("OUT_P_INLET_SRC_BP", "p_src_inlet_series.bp")
+    out_q_inlet_bp   = os.environ.get("OUT_Q_INLET_SRC_BP", "q_src_inlet_series.bp")
+    out_p_outlet_bp  = os.environ.get("OUT_P_OUTLET_SRC_BP", "p_src_outlet_series.bp")
+    out_q_outlet_bp  = os.environ.get("OUT_Q_OUTLET_SRC_BP", "q_src_outlet_series.bp")
     tol        = float(os.environ.get("NODE_TOL", "1e-6"))
     xdmf_file  = os.environ.get("MESH_TAGS_XDMF", "../geometry/bioreactor.xdmf")
 
     # 1) load terminal seeds directly from CSV
-    seeds_df, seeds_xyz, diameters =  load_terminal_seeds_from_csv(csv_path)
-    seeds_df
+    seeds_df_inlet, seeds_xyz_inlet, diameters_inlet =  load_terminal_seeds_from_csv(csv_inlet_path)
+    seeds_df_outlet, seeds_xyz_outlet, diameters_outlet =  load_terminal_seeds_from_csv(csv_outlet_path)
 
     # (Optional) 2a) snap to outlet boundary facets ONLY (recommended if you have outlet tags)
     # Example: assume outlets have tag value OUTLET (=1), or a list like [101,102,...]
@@ -580,28 +593,43 @@ if __name__ == "__main__":
     # snapped_xyz, nearest_cells = snap_seeds_to_cells(self.mesh, seeds_xyz)
 
     # Choose which set to use downstream (Laguerre, sources, etc.)
-    seed_points_for_laguerre = seeds_xyz          # or snapped_xyz if you snapped
-    seed_diameters = diameters
-    seed_ids       = seeds_df['seed_id'].to_numpy()
+    inlet_seed_points_for_laguerre = seeds_xyz_inlet          # or snapped_xyz if you snapped
+    inlet_seed_diameters = diameters_inlet
+    inlet_seed_ids       = seeds_df_inlet['seed_id'].to_numpy()
+
+    outlet_seed_points_for_laguerre = seeds_xyz_outlet    # or snapped_xyz if you snapped
+    outlet_seed_diameters = diameters_outlet
+    outlet_seed_ids       = seeds_df_outlet['seed_id'].to_numpy()
 
     # 3) Now do your Laguerre/territory or outlet mapping with seed_points_for_laguerre + seed_diameters
     with XDMFFile(MPI.COMM_WORLD, xdmf_file, "r") as xdmf:
         mesh = xdmf.read_mesh(name="Grid")
         fdim = mesh.topology.dim - 1  # Facet dimension
         mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
-    labels_local, uniq = label_cells_by_laguerre(mesh, seed_points_for_laguerre, seed_diameters,
+    labels_local, uniq = label_cells_by_laguerre(mesh, inlet_seed_points_for_laguerre, inlet_seed_diameters,
                                                  weight_mode="d2", kappa=1.0)
     cell_tags = make_cell_meshtags(mesh, labels_local)
     # (optional) write territories:
-    write_territories(mesh, cell_tags, terr_xdmf)
+    write_territories(mesh, cell_tags, terr_inlet_xdmf)
+
+    labels_local, uniq = label_cells_by_laguerre(mesh, outlet_seed_points_for_laguerre, outlet_seed_diameters,
+                                                 weight_mode="d2", kappa=1.0)
+    cell_tags = make_cell_meshtags(mesh, labels_local)
+    # (optional) write territories:
+    write_territories(mesh, cell_tags, terr_outlet_xdmf)
 
     # If territories already exist, just write sources; otherwise, build them earlier in your pipeline.
     if adios4dolfinx is None:
         print("[error] adios4dolfinx not installed; cannot write .bp", flush=True)
     else:
         try:
-            assign_and_write_sources(csv_path, terr_xdmf, mesh_bp, p1d_bp, u1d_bp,
-                                     out_bp_p_src=out_p_bp, out_bp_q_src=out_q_bp,
+            assign_and_write_sources(csv_inlet_path, terr_inlet_xdmf, mesh_inlet_bp, p1d_inlet_bp, u1d_inlet_bp,
+                                     out_bp_p_src=out_p_inlet_bp, out_bp_q_src=out_q_inlet_bp, viz_pressure_bp=viz_inlet_pressure_bp,
+                                        viz_flow_bp=viz_inlet_flow_bp,
+                                     node_match_tol=tol, verbose=True)
+            assign_and_write_sources(csv_outlet_path, terr_outlet_xdmf, mesh_outlet_bp, p1d_outlet_bp, u1d_outlet_bp,
+                                     out_bp_p_src=out_p_outlet_bp, out_bp_q_src=out_q_outlet_bp, viz_pressure_bp=viz_outlet_pressure_bp,
+                                        viz_flow_bp=viz_outlet_flow_bp,
                                      node_match_tol=tol, verbose=True)
         except FileNotFoundError as e:
             print(f"[warn] {e}. Ensure your file paths are correct.", flush=True)
