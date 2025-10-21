@@ -32,7 +32,7 @@ from mpi4py import MPI
 from dolfinx import (fem)
 from basix.ufl import element
 from dolfinx.io import XDMFFile, VTKFile
-import zero_d
+import vascularize.src.update_0d as update_0d
 
 def _die(msg: str, code: int = 2):
     print(f"[error] {msg}", file=sys.stderr, flush=True)
@@ -411,8 +411,8 @@ def main():
     print(f"[setup] coupled  = {paths.coupled}")
 
     # prepare_run0(paths, Path(args.old_1d_inlet), Path(args.old_1d_outlet))
-    zero_d.prepare_outlet_run0(
-        zero_d.Paths(paths.root, paths.geometry, paths.voronoi, paths.solves, paths.coupled),
+    update_0d.prepare_outlet_run0(
+        update_0d.Paths(paths.root, paths.geometry, paths.voronoi, paths.solves, paths.coupled),
         Path(args.old_1d_inlet)
     )
 
@@ -452,8 +452,8 @@ def main():
             print("[info] Instead, updating outlet pressures via 0D solver.")
             # 6) Run 0D solver to update outlet pressures
             assign_path = Path(args.assign_pressures_script)
-            zero_d.outlet_stage_iter(
-                zero_d.Paths(paths.root, paths.geometry, paths.voronoi, paths.solves, paths.coupled),
+            update_0d.outlet_stage_iter(
+                update_0d.Paths(paths.root, paths.geometry, paths.voronoi, paths.solves, paths.coupled),
                 run_i=k, run_next=k+1,
                 assign_script=assign_path if assign_path.exists() else None,
                 svzerodsolver=args.svzerodsolver,
