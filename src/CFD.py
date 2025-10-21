@@ -14,6 +14,8 @@ from itertools import chain
 from tqdm import trange
 import numpy as np
 import pandas as pd
+from pathlib import Path
+import json
 # from svcco.implicit.load import load3d_pv
 from time import perf_counter
 from datetime import datetime
@@ -92,12 +94,12 @@ class CFD:
         folder = self.parameters['outdir'] + os.sep + self.parameters['folder'] + os.sep
         cerm_forest = Forest(n_networks=number_of_networks, n_trees_per_network=trees_per_network) 
         cerm_forest.set_domain(cermSurf)
-        params_inlet = TreeParameters(terminal_pressure=25.0*1333.22,
+        params_inlet = TreeParameters(terminal_pressure=20.0*1333.22,
                         root_pressure=35.0*1333.22,
                         terminal_flow=0.05/60)
-        params_outlet = TreeParameters(terminal_pressure=25.0*1333.22,
-                        root_pressure=35.0*1333.22,
-                        terminal_flow=0.05/60)
+        params_outlet = TreeParameters(terminal_pressure=0.0*1333.22,
+                        root_pressure=5.0*1333.22,
+                        terminal_flow=0.025/60)
         # for i in range(number_of_networks):
         #     for j in range(trees_per_network[i]):
         #         cerm_forest.networks[i][j].parameters = params
@@ -117,14 +119,36 @@ class CFD:
         # cerm_forest.connections.tree_connections[0].show().show()
         self.cerm_forest = cerm_forest
 
-    def export_tree_0d_files(self, num_cardiac_cycles = 1, num_time_pts_per_cycle = 5, distal_pressure = 0.0): # export 0d files required for simulation
-        cerm_tree = self.cerm_tree
+    def export_tree_0d_files(self, num_cardiac_cycles = 1, num_time_pts_per_cycle = 5, distal_pressure = 0.0, modify_bc = False,
+                             Q=[-0.025/60,-0.025/60], P=[0,0], t=[0,1]): # export 0d files required for simulation
+        if not hasattr(self, 'cerm_tree'):
+            cerm_tree = self.cerm_forest.networks[0][1] # outlet tree of the first network
+        else:
+            cerm_tree = self.cerm_tree
         path_to_0d_solver = self.parameters['path_to_0d_solver']
         outdir = self.parameters['outdir']
         folder = self.parameters['folder']
         from svv.simulation.fluid.rom.zero_d.zerod_tree import export_0d_simulation
         # sim = Simulation(tree=cerm_tree)
         export_0d_simulation(tree=cerm_tree, get_0d_solver=False, path_to_0d_solver=path_to_0d_solver,outdir=outdir,folder=folder,number_cardiac_cycles=num_cardiac_cycles,number_time_pts_per_cycle=num_time_pts_per_cycle,distal_pressure=distal_pressure, geom_filename="geom.csv")
+
+        if modify_bc:
+            from convert_0d_bc import transform_flow_to_pressure_inlet_and_flow_outlets
+            data = json.load(open(os.path.join(outdir,folder,"solver_0d.in")))
+
+            # Transform
+            new_data = transform_flow_to_pressure_inlet_and_flow_outlets(
+                data=data,
+                inlet_new_name="PRESSURE_IN",
+                P_series=P,
+                t_series=t,
+                Q_series_for_outlets=Q,
+            )
+
+            # Save
+            Path(outdir + os.sep + folder + os.sep + "solver_0d_new.in").write_text(json.dumps(new_data, indent=4))
+            print("Wrote solver_new.in")
+
 
     def export_forest_0d_files(self, num_cardiac_cycles = 1, num_time_pts_per_cycle = 5, distal_pressure = 0.0): # export 0d files required for simulation
         cerm_forest = self.cerm_forest
@@ -136,12 +160,15 @@ class CFD:
         from svv.simulation.fluid.rom.zero_d.zerod_forest import export_0d_simulation
         networks = export_0d_simulation(forest=cerm_forest, network_id=0, inlets=[0,], get_0d_solver=True, path_to_0d_solver=path_to_0d_solver, outdir=outdir, folder=folder, number_cardiac_cycles=num_cardiac_cycles, number_time_pts_per_cycle=num_time_pts_per_cycle, distal_pressure=distal_pressure)
 
-    def run_0d_simulation(self): # run 0d simulation
+    def run_0d_simulation(self, modify_bc=False): # run 0d simulation
         import pysvzerod
         outputDir = self.parameters['outdir'] + os.sep + self.parameters['folder']
 
         exe = "svzerodsolver"
-        input_file = os.path.join(outputDir, "solver_0d.in")
+        if modify_bc:
+            input_file = os.path.join(outputDir, "solver_0d_new.in")
+        else:
+            input_file = os.path.join(outputDir, "solver_0d.in")
         output_file = os.path.join(outputDir, "output.csv")
 
         subprocess.run([exe, input_file, output_file],
@@ -179,6 +206,8 @@ class CFD:
         # for i in np.shape(merged_model)[0]:
         #     for j in np.shape(merged_model)[1]:
         #         merged_model.save(outdir+os.sep+"3d_tmp"+os.sep+"geom3D_{}-{}.vtp".format(i,j))
+
+        cerm_forest.networks[0][1].parameters.root_pressure = 0.0*1333.22
     
         from svv.simulation.simulation import Simulation
         names = ["inlet", "outlet"]
@@ -198,7 +227,7 @@ class CFD:
         # # _,_,self.data = cerm_tree.export_1d_simulation(steady = True, outdir=outdir, folder=folder,number_cariac_cycles=number_cardiac_cycles,num_points=num_points)
         # self.save_data()
 
-    def run_tree_1d_simulation(self): # run 1d simulation
+    def run_tree_1d_simulation(self, extract_terminal_pressure = False): # run 1d simulation
         import shutil
         one_d_folder = self.parameters['outdir']  + os.sep + self.parameters['folder']
         os.chdir(one_d_folder)
@@ -311,78 +340,44 @@ class CFD:
         shutil.copy(fileName, backup_path)
         print(f"Backup saved at: {backup_path}")
 
+        from assign_pressure_bcs import main
+
+        sys.argv = [
+            "assign_outlet_pressures.py",
+            "--deck", fileName,
+            "--output", self.parameters['outdir']  + os.sep + self.parameters['folder'] + os.sep + "output.csv",
+            "--branching", self.parameters['outdir']  + os.sep + "branchingData_1.csv",
+        ]
+        main()
+
         replace = "OUTPUT TEXT"
         new_path = "OUTPUT VTK 0"
-        terminal_pressure = 20.0  # mmHg, change as needed
-
-        pressure_val = terminal_pressure * 1333.22
-        outlet_pressure = 5.0 * 1333.22  # Convert mmHg to dyn/cm^2
-
-        # --- Read original file ---
+        # Read the file and store the modified content
         with open(fileName, "r") as file:
-            lines = file.readlines()
+            lines = file.readlines()  # Read all lines
 
-        new_lines = []
-        seen_segment = False
-
-        for line in lines:
-            # --- Replace OUTPUT TEXT ---
-            if line.strip() == replace:
-                line = new_path + "\n"
-
-            # --- Replace 5th entry in SEGMENT (finite elements) ---
-            if line.startswith("SEGMENT"):
-                parts = line.split()
-                if len(parts) > 5 and parts[4] == "5":
-                    parts[4] = "100"
-                # Replace RCR RCR_* with PRESSURE PRES_BC
-                line = " ".join(parts) + "\n"
-                line = re.sub(r"RCR\s+RCR_\S+", "PRESSURE PRES_BC", line)
-                seen_segment = True
-
-            new_lines.append(line)
-
-        # --- Add PRES_IN table after last SEGMENT ---
-        out_lines = []
-        for i, line in enumerate(new_lines):
-            out_lines.append(line)
-            if line.startswith("SEGMENT") and (
-                i == len(new_lines) - 1 or not new_lines[i + 1].startswith("SEGMENT")
-            ):
-                if seen_segment:
-                    out_lines.append("DATATABLE PRES_BC LIST\n")
-                    out_lines.append(f" 0.000000 {pressure_val:.4f}\n")
-                    out_lines.append("ENDDATATABLE\n")
-
-        # --- Fix INFLOW table (make values negative) ---
-        final_lines = []
-        inside_inflow = False
-        for line in out_lines:
-            if line.strip().startswith("DATATABLE PRES_IN LIST"):
-                inside_inflow = True
-                final_lines.append(line)
-                continue
-            if inside_inflow:
-                if line.strip().startswith("ENDDATATABLE"):
-                    inside_inflow = False
-                    final_lines.append(line)
-                else:
-                    parts = line.strip().split()
-                    if len(parts) == 2:
-                        t, val = parts
-                        try:
-                            val = float(val)
-                            final_lines.append(f" {t} {outlet_pressure:.6f}\n")
-                        except ValueError:
-                            final_lines.append(line)
-                    else:
-                        final_lines.append(line)
-            else:
-                final_lines.append(line)
-
-        # --- Write modified file ---
+        # Modify the target line
         with open(fileName, "w") as file:
-            file.writelines(final_lines)
+            for line in lines:
+                if line.strip() == replace:  # Match the line (strip to ignore spaces)
+                    file.write(new_path + "\n")  # Write the new line
+                else:
+                    file.write(line)  # Keep the other lines unchanged
+
+        # Replace the number of finite elements in each segment
+
+        # Replace only the 5th entry after SEGMENT
+        with open(fileName, "w") as file:
+            for line in lines:
+                if line.startswith("SEGMENT"):  # Check if the line starts with SEGMENT
+                    parts = line.split()  # Split the line into parts
+                    if len(parts) > 5 and parts[4] == "5":  # Ensure the 4th entry exists and is "5"
+                        parts[4] = "100"  # Replace the 4th entry
+                    line = " ".join(parts) + "\n"  # Reconstruct the line
+                if line.strip() == replace:  # Match the line (strip to ignore spaces)
+                    file.write(new_path + "\n")  # Write the new line
+                else:
+                    file.write(line)  # Write the modified line
 
         path_to_1d_solver = self.parameters['path_to_1d_solver']
         
