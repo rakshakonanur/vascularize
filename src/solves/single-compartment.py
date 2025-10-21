@@ -234,7 +234,7 @@ def compute_and_write_mbf(self, p_DG0, beta, xdmf_out="out_mixed_poisson/mbf.xdm
     return q_global
 
 
-def single_compartment(self, source_pressures):
+def single_compartment(self, source_pressures, sink_pressures):
     Q_bio = self.flow # given from Qterm in 1D sim, convert to cm^3/s
 
     # Calculate volume of the bioreactor
@@ -246,17 +246,19 @@ def single_compartment(self, source_pressures):
     print(f"Mesh volume: {V_bio}", flush=True) # Volume of the bioreactor
 
     Pcap = 15*1333.22  # Capillary pressure, converted to dyne/cm^2
-    Psnk = 0  # Sink pressure
+    Psnk = sink_pressures # Sink pressure
 
     Psrc_values = source_pressures[-1].x.array  # Get the values of the outlet BCs
+    Psnk_values = sink_pressures[-1].x.array
     # print(f"Outlet pressures: {Psrc_values}", flush=True)
     Psrc_avg = np.mean(Psrc_values)  # Average pressure at the outlets
+    Psnk_avg = np.mean(Psnk_values)
     print(f"Average pressure at outlets: {Psrc_avg}", flush=True)
 
     beta_src = (Q_bio / V_bio) * (1/(Psrc_avg -Pcap)) # Source term coefficient
-    beta_snk = (Q_bio / V_bio) * (1/(Pcap - Psnk))  # Sink term coefficient
+    beta_snk = (Q_bio / V_bio) * (1/(Pcap - Psnk_avg))  # Sink term coefficient
 
-    Psnk_c = dfx.fem.Constant(self.mesh, PETSc.ScalarType(Psnk))
+    # Psnk_c = dfx.fem.Constant(self.mesh, PETSc.ScalarType(Psnk))
     beta_src_c = dfx.fem.Constant(self.mesh, PETSc.ScalarType(beta_src))
     beta_snk_c = dfx.fem.Constant(self.mesh, PETSc.ScalarType(beta_snk))
 
@@ -265,10 +267,10 @@ def single_compartment(self, source_pressures):
         f.write(f"beta_src (1/s): {beta_src}\n")
         f.write(f"beta_snk (1/s): {beta_snk}\n")
 
-    return beta_src_c, beta_snk_c, Psnk_c
+    return beta_src_c, beta_snk_c
 
 class PerfusionSolver:
-    def __init__(self, mesh_tag_file: str, pres_file: str, flow_file: str):
+    def __init__(self, mesh_tag_file: str, pres_inlet_file: str, pres_outlet_file: str, flow_file: str):
         """
         Initialize the PerfusionSolver with a given STL file and branching data.
         """
@@ -276,7 +278,8 @@ class PerfusionSolver:
         self.write_output = True
         self.element_degree = 1
         self.mesh, self.cell_tags = import_mesh(mesh_tag_file)
-        self.p_src = import_pressure_data(self, pres_file, k=self.element_degree-1)
+        self.p_src = import_pressure_data(self, pres_inlet_file, k=self.element_degree-1)
+        self.p_snk = import_pressure_data(self, pres_outlet_file, k=self.element_degree-1)
         self.flow = import_flow_data(self, flow_file)
 
     def setup(self, init: bool = True):
@@ -313,7 +316,7 @@ class PerfusionSolver:
         # Zero flux on boundaries is default for BDM elements, so no need to explicitly impose
 
         if init:
-            beta_src, beta_snk, Psnk = single_compartment(self, self.p_src) # Source and sink terms
+            beta_src, beta_snk = single_compartment(self, self.p_src, self.p_snk) # Source and sink terms
         else:
             with open(current_dir/"perfusion_parameters.txt", "r") as f:
                 lines = f.readlines()
@@ -322,13 +325,13 @@ class PerfusionSolver:
             beta_src = dfx.fem.Constant(self.mesh, PETSc.ScalarType(beta_src_value))
             beta_snk = dfx.fem.Constant(self.mesh, PETSc.ScalarType(beta_snk_value))
             Psnk = dfx.fem.Constant(self.mesh, PETSc.ScalarType(0.0))
-
+        
         print(f"Length of p_src:", len(self.p_src[-1].x.array), flush=True)
         print(f"Mean of p_src:", np.mean(self.p_src[-1].x.array), flush=True)
         print(f"Beta_src (1/s): {float(beta_src.value)}", flush=True)
         print(f"Beta_snk (1/s): {float(beta_snk.value)}", flush=True)
         fLHS = p * (beta_snk + beta_src) 
-        fRHS = beta_src * self.p_src[-1] + beta_snk * Psnk
+        fRHS = beta_src * self.p_src[-1] + beta_snk * self.p_snk[-1]
 
         a = Kinv * inner(u, w) * dx - inner(p, div(w)) * dx + inner(div(u), v) * dx  + inner(fLHS, v) * dx  + ufl.inner(p, ufl.dot(w, n)) * self.ds
         # a = Kinv * inner(u, w) * dx + inner(grad(p), w) * dx + inner(div(u), v) * dx  + inner(fLHS, v) * dx
@@ -400,8 +403,9 @@ class PerfusionSolver:
 
 if __name__ == "__main__":
     mesh_file = "../voronoi/territories.xdmf"
-    pres_file = "../voronoi/p_src_series.bp"
+    pres_inlet_file = "../voronoi/p_src_inlet_series.bp"
+    pres_outlet_file = "../voronoi/p_src_outlet_series.bp"
     flow_file = "../voronoi/q_src_series.bp"
-    solver = PerfusionSolver(mesh_file, pres_file, flow_file)
+    solver = PerfusionSolver(mesh_file, pres_inlet_file, pres_outlet_file, flow_file)
     solver.setup(init=True)
     print("Perfusion solve complete.")
