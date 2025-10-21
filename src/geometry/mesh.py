@@ -250,7 +250,7 @@ def convert_vertex_tags_to_facet_tags(mesh, vertex_tags):
                 mesh.geometry
             )
 
-def generate_1d_files(xdmf_file, output_dir):
+def generate_1d_files(xdmf_file, output_dir, file_prefix=None):
 
     # Load the converted XDMF mesh
     with XDMFFile(MPI.COMM_WORLD, current_dir/xdmf_file, "r") as xdmf:
@@ -275,11 +275,11 @@ def generate_1d_files(xdmf_file, output_dir):
     outlet_coords, facet_tag = branch_mesh_tagging(mesh)
 
     # If file exists, remove it
-    if (current_dir / "tagged_branches.bp").exists():
-        send2trash(current_dir / "tagged_branches.bp")
+    if (current_dir / f"tagged_branches{file_prefix}.bp").exists():
+        send2trash(current_dir / f"tagged_branches{file_prefix}.bp")
 
-    adios4dolfinx.write_mesh(Path(str(current_dir / "tagged_branches.bp")), mesh, engine="BP4")
-    adios4dolfinx.write_meshtags(Path(str(current_dir / "tagged_branches.bp")), mesh, facet_tag, engine="BP4")
+    adios4dolfinx.write_mesh(Path(str(current_dir / f"tagged_branches{file_prefix}.bp")), mesh, engine="BP4")
+    adios4dolfinx.write_meshtags(Path(str(current_dir / f"tagged_branches{file_prefix}.bp")), mesh, facet_tag, engine="BP4")
 
     # Allocate u_val as a 2D array for all timesteps and dofs
     u_val = np.zeros((Nt, num_dofs))
@@ -289,14 +289,14 @@ def generate_1d_files(xdmf_file, output_dir):
                                        mesh.topology.dim - 1)
     
     vtx_vel = dfx.io.VTXWriter(
-        MPI.COMM_WORLD, current_dir/"velocity.bp", [velocity_fn], engine="BP4"
+        MPI.COMM_WORLD, current_dir/f"velocity{file_prefix}.bp", [velocity_fn], engine="BP4"
     )
     
     vtx_pres = dfx.io.VTXWriter(
-        MPI.COMM_WORLD, current_dir/"pressure.bp", [pressure_fn], engine="BP4"
+        MPI.COMM_WORLD, current_dir/f"pressure{file_prefix}.bp", [pressure_fn], engine="BP4"
     )
     vtx_flow = dfx.io.VTXWriter(
-        MPI.COMM_WORLD, current_dir/"flow.bp", [flow_fn], engine="BP4"
+        MPI.COMM_WORLD, current_dir/f"flow{file_prefix}.bp", [flow_fn], engine="BP4"
     )
     vtx_vel.write(0.0)
     vtx_pres.write(0.0)
@@ -308,12 +308,12 @@ def generate_1d_files(xdmf_file, output_dir):
     dt = 1
 
     # if checkpoint files exist, remove them
-    if (current_dir / "velocity_checkpoint.bp").exists():
-        send2trash(current_dir / "velocity_checkpoint.bp")
-    if (current_dir / "pressure_checkpoint.bp").exists():
-        send2trash(current_dir / "pressure_checkpoint.bp")
-    if (current_dir / "flow_checkpoint.bp").exists():
-        send2trash(current_dir / "flow_checkpoint.bp")
+    if (current_dir / f"velocity_checkpoint{file_prefix}.bp").exists():
+        send2trash(current_dir / f"velocity_checkpoint{file_prefix}.bp")
+    if (current_dir / f"pressure_checkpoint{file_prefix}.bp").exists():
+        send2trash(current_dir / f"pressure_checkpoint{file_prefix}.bp")
+    if (current_dir / f"flow_checkpoint{file_prefix}.bp").exists():
+        send2trash(current_dir / f"flow_checkpoint{file_prefix}.bp")
 
     for i in range(Nt):
         time = i * dt
@@ -348,17 +348,17 @@ def generate_1d_files(xdmf_file, output_dir):
         flow_fn.x.array[:] = interpolated_flow
 
         adios4dolfinx.write_function(
-            Path(current_dir/"velocity_checkpoint.bp"),
+            Path(current_dir / f"velocity_checkpoint{file_prefix}.bp"),
             u = velocity_fn,
             time=float(time),
             name="f")
         adios4dolfinx.write_function(
-            Path(current_dir/"pressure_checkpoint.bp"),
+            Path(current_dir / f"pressure_checkpoint{file_prefix}.bp"),
             u = pressure_fn,
             time=float(time),
             name="f")
         adios4dolfinx.write_function(
-            Path(current_dir/"flow_checkpoint.bp"),
+            Path(current_dir / f"flow_checkpoint{file_prefix}.bp"),
             u = flow_fn,
             time=float(time),
             name="f")
@@ -537,16 +537,16 @@ def domain_mesh_tagging_nearest(xdmf_file, coords):
 
     return vertex_tags, mesh
 
-def import_branched_mesh(branching_data_file, output_1d, geo_file="branched_network.geo", msh_file="branched_network.msh", xdmf_file="branched_network.xdmf"):
+def import_branched_mesh(branching_data_file, output_1d, geo_file="branched_network.geo", msh_file="branched_network.msh", xdmf_file="branched_network.xdmf", fileprefix=""):
     df = pd.read_csv(branching_data_file)
     branch.write_geo_from_branching_data(df, geo_file=geo_file)
     geo_to_mesh_gmsh(geo_file=geo_file, msh_file=msh_file)
     convert_mesh(msh_file=msh_file, xdmf_file=xdmf_file)
     xdmf_to_dolfinx(xdmf_file=xdmf_file)
-    outlet_coords = generate_1d_files(xdmf_file=xdmf_file, output_dir=output_1d)
+    outlet_coords = generate_1d_files(xdmf_file=xdmf_file, output_dir=output_1d, file_prefix=fileprefix)
     return outlet_coords
 
-def create_bioreactor_mesh(stl_file, msh_file="bioreactor.msh", xdmf_file="bioreactor.xdmf", diric=None):
+def create_bioreactor_mesh(stl_file, msh_file="bioreactor.msh", xdmf_file="bioreactor.xdmf"):
     stl_to_mesh_gmsh(stl_file, msh_file=msh_file)
     mesh_to_xdmf(msh_file=msh_file, xdmf_file=xdmf_file)
     xdmf_to_dolfinx(xdmf_file=xdmf_file)
@@ -555,10 +555,14 @@ def create_bioreactor_mesh(stl_file, msh_file="bioreactor.msh", xdmf_file="biore
 
 
 class Files():
-    def __init__(self, stl_file, output_1d, branching_data_file, init = True):
-        dirichlet = import_branched_mesh(branching_data_file, output_1d)
+    def __init__(self, stl_file, output_1d_inlet, output_1d_outlet, branching_data_inlet, branching_data_outlet, init = True, single=True):
+        if single:
+            _ = import_branched_mesh(branching_data_inlet, output_1d_inlet, inlet = True)
+        else:
+            _ = import_branched_mesh(branching_data_inlet, output_1d_inlet, geo_file="branched_network_inlet.geo", msh_file="branched_network_inlet.msh", xdmf_file="branched_network_inlet.xdmf", fileprefix="_inlet")
+            _ = import_branched_mesh(branching_data_outlet, output_1d_outlet, geo_file="branched_network_outlet.geo", msh_file="branched_network_outlet.msh", xdmf_file="branched_network_outlet.xdmf", fileprefix="_outlet")
         if init:
-            create_bioreactor_mesh(stl_file, diric=dirichlet)
+            create_bioreactor_mesh(stl_file)
         self.D_value = 1e-2  # Diffusion coefficient
         self.element_degree = 1  # Polynomial degree for finite elements
         self.write_output = True  # Whether to write output files   
@@ -569,7 +573,10 @@ if __name__ == "__main__":
     # perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/syntheticVasculature/files/geometry/cermRaksha_scaled.stl",
     #                             branching_data_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/090425/Run2_50branches/1D_Input_Files/branchingData.csv")
     perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/vascularize/files/geometry/cermRaksha_scaled_big.stl",
-                                output_1d = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/093025/Run3_10branches/1D_Input_Files/inlet",
-                                branching_data_file="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/093025/Run3_10branches/branchingData_0.csv",
+                                output_1d_inlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/1D_Input_Files/inlet",
+                                output_1d_outlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/1D_Input_Files/outlet",
+                                branching_data_inlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/branchingData_0.csv",
+                                branching_data_outlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/branchingData_1.csv",
+                                single=False,
                                 init=True
                                 )
