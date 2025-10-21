@@ -31,6 +31,9 @@ else:
         obj.plot_0d_results_to_3d()
     else:
         # obj.export_forest_0d_files(num_cardiac_cycles=3, num_time_pts_per_cycle=5, distal_pressure=0.0)
+        obj.export_tree_0d_files(modify_bc=True)
+        obj.run_0d_simulation(modify_bc=True)
+        obj.plot_0d_results_to_3d()
         obj.export_forest_1d_files()
         obj.run_forest_inlet_1d_simulation()
         obj.run_forest_outlet_1d_simulation()
