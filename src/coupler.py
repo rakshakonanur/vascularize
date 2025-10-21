@@ -32,6 +32,7 @@ from mpi4py import MPI
 from dolfinx import (fem)
 from basix.ufl import element
 from dolfinx.io import XDMFFile, VTKFile
+import zero_d
 
 def _die(msg: str, code: int = 2):
     print(f"[error] {msg}", file=sys.stderr, flush=True)
@@ -94,8 +95,8 @@ def _summarize_rel_err(qk: np.ndarray, qkp1: np.ndarray, eps: float) -> dict:
 
     # Denominator is qk (not |qk|). Guard zeros with +eps, preserve sign,
     # then take absolute value of the ratio to keep the metric non-negative.
-    denom = np.where(qk > eps, qk, eps)
-    rel   = np.abs(qk - qkp1) / denom
+    denom = np.where(np.abs(qk) > eps, qk, eps)
+    rel   = np.abs(qk - qkp1) / np.abs(denom)
 
     return {
         "max": float(np.max(rel)),
@@ -124,7 +125,7 @@ def discover_paths(start: Path) -> Paths:
         coupled=root / "coupled",
     )
 
-def prepare_run0(paths: Paths, old_inlet: Path):
+def prepare_run0(paths: Paths, old_inlet: Path, old_outlet: Path):
     """
     Create ./coupled/run_0 and copy the existing 1D inlet folder there.
     Also copy branchingData_0.csv into ./coupled/run_0/.
@@ -136,10 +137,17 @@ def prepare_run0(paths: Paths, old_inlet: Path):
     _ensure_dir(run0)
     # Copy inlet folder
     _copy_tree(old_inlet, inlet_dst)
+
+    outlet_dst = run0 / "outlet"
+    _ensure_dir(outlet_dst)
+    _copy_tree(old_outlet, outlet_dst)
+
     # Try to copy branchingData_0.csv next to run_0
     src_csv = old_inlet.parent.parent / "branchingData_0.csv"
+    snk_csv = old_inlet.parent.parent / "branchingData_1.csv"
     if src_csv.exists():
         shutil.copy2(src_csv, run0 / "branchingData_0.csv")
+        shutil.copy2(snk_csv, run0 / "branchingData_1.csv")
     else:
         print(f"[warn] Did not find {src_csv}. Make sure branchingData_0.csv is present.", flush=True)
     # Original results backup
@@ -161,14 +169,16 @@ def run_geometry(paths: Paths, stl_file: Path, run_i: int):
     if Files is None:
         _die("geometry/mesh.py does not define class 'Files'")
 
-    output_1d = paths.coupled / f"run_{run_i}" / "inlet"
-    branching_csv = paths.coupled / f"run_0" / "branchingData_0.csv"
-    print(f"[geometry] stl={stl_file}\n           output_1d={output_1d}\n           branching_data_file={branching_csv}")
+    output_1d_inlet = paths.coupled / f"run_{run_i}" / "inlet"
+    output_1d_outlet = paths.coupled / f"run_{run_i}" / "outlet"
+    branching_csv_inlet = paths.coupled / f"run_0" / "branchingData_0.csv"
+    branching_csv_outlet = paths.coupled / f"run_0" / "branchingData_1.csv"
+    print(f"[geometry] stl={stl_file}\n           output_1d_inlet={output_1d_inlet}\n           output_1d_outlet={output_1d_outlet}\n           branching_data_file={branching_csv_inlet}", flush=True)
     if run_i == 0:
         init = True
     else:
-        init = False
-    Files(stl_file=str(stl_file), output_1d=str(output_1d), branching_data_file=str(branching_csv),init=init)
+        init = False # Use True to re-use existing tags; False would re-generate from scratch
+    Files(stl_file=str(stl_file), output_1d_inlet=str(output_1d_inlet), output_1d_outlet=str(output_1d_outlet), branching_data_inlet=str(branching_csv_inlet), branching_data_outlet=str(branching_csv_outlet), single = False, init=init)
     print("[ok] Geometry generated/refreshed.", flush=True)
 
 def run_tesselate(paths: Paths, run_i: int, node_tol: float):
@@ -180,13 +190,20 @@ def run_tesselate(paths: Paths, run_i: int, node_tol: float):
         _die(f"Missing {script}")
     env = os.environ.copy()
     env.update({
-        "SEEDS_CSV": str(paths.coupled / f"run_0" / "branchingData_0.csv"),
-        "TERRITORIES_XDMF": str(paths.voronoi / "territories.xdmf"),
-        "MESH_BP": str(paths.geometry / "tagged_branches.bp"),
-        "PRESSURE_BP": str(paths.geometry / "pressure_checkpoint.bp"),
-        "FLOW_BP": str(paths.geometry / "flow_checkpoint.bp"),
-        "OUT_P_SRC_BP": str(paths.voronoi / "p_src_series.bp"),
-        "OUT_Q_SRC_BP": str(paths.voronoi / "q_src_series.bp"),
+        "SEEDS_INLET_CSV": str(paths.coupled / f"run_0" / "branchingData_0.csv"),
+        "SEEDS_OUTLET_CSV": str(paths.coupled / f"run_0" / "branchingData_1.csv"),
+        "TERRITORIES_INLET_XDMF": str(paths.voronoi / "territories_inlet.xdmf"),
+        "TERRITORIES_OUTLET_XDMF": str(paths.voronoi / "territories_outlet.xdmf"),
+        "MESH_INLET_BP": str(paths.geometry / "tagged_branches_inlet.bp"),
+        "MESH_OUTLET_BP": str(paths.geometry / "tagged_branches_outlet.bp"),
+        "PRESSURE_INLET_BP": str(paths.geometry / "pressure_checkpoint_inlet.bp"),
+        "PRESSURE_OUTLET_BP": str(paths.geometry / "pressure_checkpoint_outlet.bp"),
+        "FLOW_INLET_BP": str(paths.geometry / "flow_checkpoint_inlet.bp"),
+        "FLOW_OUTLET_BP": str(paths.geometry / "flow_checkpoint_outlet.bp"),
+        "OUT_P_INLET_SRC_BP": str(paths.voronoi / "p_src_inlet_series.bp"),
+        "OUT_P_OUTLET_SRC_BP": str(paths.voronoi / "p_src_outlet_series.bp"),
+        "OUT_Q_INLET_SRC_BP": str(paths.voronoi / "q_src_inlet_series.bp"),
+        "OUT_Q_OUTLET_SRC_BP": str(paths.voronoi / "q_src_outlet_series.bp"),
         "NODE_TOL": str(node_tol),
         "MESH_TAGS_XDMF": str(paths.geometry / "bioreactor.xdmf"),
     })
@@ -207,26 +224,40 @@ def run_darcy(paths: Paths, init: bool, run_i: int):
     PerfusionSolver = getattr(mod, "PerfusionSolver", None)
     if PerfusionSolver is None:
         _die("darcy_P1.py does not define class 'PerfusionSolver'")
-    mesh_file = str(paths.voronoi / "territories.xdmf")
-    pres_file  = str(paths.voronoi / "p_src_series.bp")
-    vel_file  = str(paths.voronoi / "q_src_series.bp")
-    solver = PerfusionSolver(mesh_file, pres_file, vel_file)
+    mesh_inlet_file = str(paths.voronoi / "territories_inlet.xdmf")
+    mesh_outlet_file = str(paths.voronoi / "territories_outlet.xdmf")
+    pres_inletfile  = str(paths.voronoi / "p_src_inlet_series.bp")
+    vel_inletfile  = str(paths.voronoi / "q_src_inlet_series.bp")
+    pres_outletfile  = str(paths.voronoi / "p_src_outlet_series.bp")
+    vel_outletfile  = str(paths.voronoi / "q_src_outlet_series.bp")
+    solver = PerfusionSolver(mesh_inlet_file, mesh_outlet_file, pres_inletfile, pres_outletfile, vel_inletfile, vel_outletfile)
     solver.setup(init=bool(init))
     print("[ok] Perfusion solve complete.", flush=True)
     # Copy mbf outputs into current run folder
-    mbf_x = paths.solves / "out_darcy" / "mbf.xdmf"
-    mbf_bp = paths.solves / "out_darcy" / "mbf.bp"
+    mbf_inlet_x = paths.solves / "out_darcy" / "mbf_inlet.xdmf"
+    mbf_outlet_x = paths.solves / "out_darcy" / "mbf_outlet.xdmf"
+    mbf_inlet_bp = paths.solves / "out_darcy" / "mbf_inlet.bp"
+    mbf_outlet_bp = paths.solves / "out_darcy" / "mbf_outlet.bp"
     run_dir = paths.coupled / f"run_{run_i}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    if mbf_x.exists():
-        shutil.copy2(mbf_x, run_dir / "mbf.xdmf")
-        shutil.copy2(mbf_x.with_suffix(".h5"), run_dir / "mbf.h5")
-    if mbf_bp.exists():
-        dst_bp = run_dir / "mbf.bp"
+    if mbf_inlet_x.exists():
+        shutil.copy2(mbf_inlet_x, run_dir / "mbf_inlet.xdmf")
+        shutil.copy2(mbf_inlet_x.with_suffix(".h5"), run_dir / "mbf_inlet.h5")
+    if mbf_outlet_x.exists():
+        shutil.copy2(mbf_outlet_x, run_dir / "mbf_outlet.xdmf")
+        shutil.copy2(mbf_outlet_x.with_suffix(".h5"), run_dir / "mbf_outlet.h5")
+    if mbf_outlet_bp.exists():
+        dst_bp = run_dir / "mbf_outlet.bp"
         # copy the .bp directory recursively
         if dst_bp.exists():
             shutil.rmtree(dst_bp)
-        shutil.copytree(mbf_bp, dst_bp)
+        shutil.copytree(mbf_outlet_bp, dst_bp)
+    if mbf_inlet_bp.exists():
+        dst_bp = run_dir / "mbf_inlet.bp"
+        # copy the .bp directory recursively
+        if dst_bp.exists():
+            shutil.rmtree(dst_bp)
+        shutil.copytree(mbf_inlet_bp, dst_bp)
     else:
         print("[warn] mbf.bp directory not found; skipping copy.", flush=True)
 
@@ -238,25 +269,32 @@ def compare_q(mesh_file, paths: Paths, eps: float) -> tuple[float, dict]:
     Returns (max_rel, summary_dict)
     """
 
-    q_src = paths.voronoi / "q_src_series.bp"
+    q_src = paths.voronoi / "q_src_inlet_series.bp"
+    q_snk = paths.voronoi / "q_src_outlet_series.bp"
     if not q_src.exists():
         _die("q_src_series.bp not found in voronoi/")
-    mbf_bp = paths.solves / "out_darcy" / "mbf.bp"
-    if not mbf_bp.exists():
-        _die("Missing solves/out_darcy/mbf.bp")
+    mbf_inlet_bp = paths.solves / "out_darcy" / "mbf_inlet.bp"
+    if not mbf_inlet_bp.exists():
+        _die("Missing solves/out_darcy/mbf_inlet.bp")
+    mbf_outlet_bp = paths.solves / "out_darcy" / "mbf_outlet.bp"
+    if not mbf_outlet_bp.exists():
+        _die("Missing solves/out_darcy/mbf_outlet.bp")
 
     with XDMFFile(MPI.COMM_WORLD, mesh_file, "r") as xdmf:
         mesh = xdmf.read_mesh(name="Grid")
         fdim = mesh.topology.dim - 1  # Facet dimension
 
     try:
-        qk = _read_last_step_bp_array(mesh, q_src, function_name="q_src_density")
-        qkp1 = _read_last_step_bp_array(mesh, mbf_bp, function_name="mbf_qTi_tagconst")
+        qk_src = _read_last_step_bp_array(mesh, q_src, function_name="q_src_density")
+        qk_snk = _read_last_step_bp_array(mesh, q_snk, function_name="q_src_density")
+        qkp1_src = _read_last_step_bp_array(mesh, mbf_inlet_bp, function_name="mbf_qTi_tagconst")
+        qkp1_snk = _read_last_step_bp_array(mesh, mbf_outlet_bp, function_name="mbf_qTi_tagconst")
     except Exception as e:
         _die(f"Failed reading .bp files: {e}")
 
-    stats = _summarize_rel_err(qk, qkp1, eps)
-    return stats["max"], stats
+    stats_src = _summarize_rel_err(qk_src, qkp1_src, eps)
+    stats_snk = _summarize_rel_err(qk_snk, qkp1_snk, eps)
+    return max(stats_src["max"], stats_snk["max"]), {"inlet": stats_src, "outlet": stats_snk}
 
 def update_resistances(paths: Paths, run_i: int, run_next: int):
     """
@@ -268,9 +306,9 @@ def update_resistances(paths: Paths, run_i: int, run_next: int):
     _ensure_dir(paths.coupled / f"run_{run_next}" / "inlet")
     args = [
         sys.executable, str(script),
-        "--territories-xdmf", str(paths.voronoi / "territories.xdmf"),
-        "--p-src-bp",         str(paths.voronoi / "p_src_series.bp"),
-        "--mbf-bp",           str(paths.solves / "out_darcy" / "mbf.bp"),
+        "--territories-xdmf", str(paths.voronoi / "territories_inlet.xdmf"),
+        "--p-src-bp",         str(paths.voronoi / "p_src_inlet_series.bp"),
+        "--mbf-bp",           str(paths.solves / "out_darcy" / "mbf_inlet.bp"),
         "--card-in",          str(paths.coupled / f"run_{run_i}" / "inlet" / "1d_simulation_input.json"),
         "--card-out",         str(paths.coupled / f"run_{run_next}" / "inlet" / "1d_simulation_input.json"),
     ]
@@ -289,21 +327,38 @@ def run_1d_solver(solver_cmd: str, paths: Paths, run_next: int):
     _ensure_dir(out_dir)
     cmd = [solver_cmd, str(card)]
     _run(cmd, cwd=out_dir)
-    print("[ok] 1D solver finished.", flush=True)
+    print("[ok] 1D solver for inlet finished.", flush=True)
+    card = paths.coupled / f"run_{run_next}" / "outlet" / "1d_simulation_input.json"
+    out_dir = paths.coupled / f"run_{run_next}" / "outlet"
+    if not card.exists():
+        _die(f"Missing 1D card for run_{run_next}: {card}")
+    _ensure_dir(out_dir)
+    cmd = [solver_cmd, str(card)]
+    _run(cmd, cwd=out_dir)
+    print("[ok] 1D solver for outlet finished.", flush=True)
 
 def append_progress(paths: Paths, it: int, stats: dict, tol: float):
     """
     Append iteration stats to coupled/convergence.csv and update a simple plot.
     """
     import csv
-    csv_path = paths.coupled / "convergence.csv"
+    csv_path = paths.coupled / "convergence_inlet.csv"
     write_header = not csv_path.exists()
     with open(csv_path, "a", newline="") as f:
         w = csv.writer(f)
         if write_header:
             w.writerow(["iter", "max", "mean", "median", "p95"])
-        w.writerow([it, stats["max"], stats["mean"], stats["median"], stats["p95"]])
-    print(f"[progress] iter={it}  max_rel={stats['max']:.5f}  tol={tol:.5f}")
+        w.writerow([it, stats["inlet"]["max"], stats["inlet"]["mean"], stats["inlet"]["median"], stats["inlet"]["p95"]])
+    print(f"[progress] iter={it}  max_rel={stats['inlet']['max']:.5f}  tol={tol:.5f}")
+
+    csv_path = paths.coupled / "convergence_outlet.csv"
+    write_header = not csv_path.exists()
+    with open(csv_path, "a", newline="") as f:
+        w = csv.writer(f)
+        if write_header:
+            w.writerow(["iter", "max", "mean", "median", "p95"])
+        w.writerow([it, stats["outlet"]["max"], stats["outlet"]["mean"], stats["outlet"]["median"], stats["outlet"]["p95"]])
+    print(f"[progress] iter={it}  max_rel={stats['outlet']['max']:.5f}  tol={tol:.5f}")
 
     if plt is not None:
         try:
@@ -326,14 +381,22 @@ def append_progress(paths: Paths, it: int, stats: dict, tol: float):
 def main():
     ap = argparse.ArgumentParser(description="Coupled 1D-NS <-> Darcy pipeline")
     ap.add_argument("--project-root", default=".", help="Path to src/ (contains geometry/, voronoi/, solves/)")
-    ap.add_argument("--old-1d-inlet", default="../output/Forest_Output/1D_Output/100325/Run5_20branches/1D_Input_Files/inlet",
+    ap.add_argument("--old-1d-inlet", default="../output/Forest_Output/1D_Output/101725/Run6_10branches/1D_Input_Files/inlet",
                     help="Path to existing 1D inlet folder to seed run_0 (contains 1d_simulation_input.json)")
+    ap.add_argument("--old-1d-outlet", default="../output/Forest_Output/1D_Output/101725/Run6_10branches/1D_Input_Files/outlet",
+                    help="Path to existing 1D outlet folder to seed run_0 (contains 1d_simulation_input.json)")
     ap.add_argument("--stl-file", default="../files/geometry/cermRaksha_scaled_big.stl",
                     help="Path to cermRaksha_scaled_big.stl (if omitted, will try geometry/branched_network.xdmf route)")
     ap.add_argument("--one-d-solver-cmd", default='/usr/local/sv/oneDSolver/2025-06-26/bin/OneDSolver',
                     help="Command/binary to run 1D solver, e.g. /path/to/solver")
+    ap.add_argument("--svzerodsolver", default="svzerodsolver",
+                help="svZeroDSolver binary")
+    ap.add_argument("--assign-pressures-script", default="assign_pressure_bcs.py",
+                    help="Script that updates 1D outlet pressure BCs from 0D results")
+    ap.add_argument("--node-scale", type=float, default=1.0,
+                help="Scale distal coords if CSV is not in meters (e.g., 0.001 for mm)")
     ap.add_argument("--tol", type=float, default=0.01, help="Convergence tolerance on relative flow (default 1%)")
-    ap.add_argument("--max-iters", type=int, default=10, help="Max coupling iterations")
+    ap.add_argument("--max-iters", type=int, default=20, help="Max coupling iterations")
     ap.add_argument("--node-tol", type=float, default=1e-6, help="Node matching tolerance for Voronoi seeding")
     ap.add_argument("--mesh-file", default="geometry/bioreactor.xdmf", help="Path to mesh file")
     args = ap.parse_args()
@@ -347,15 +410,20 @@ def main():
     print(f"[setup] solves   = {paths.solves}")
     print(f"[setup] coupled  = {paths.coupled}")
 
-    prepare_run0(paths, Path(args.old_1d_inlet))
+    # prepare_run0(paths, Path(args.old_1d_inlet), Path(args.old_1d_outlet))
+    zero_d.prepare_outlet_run0(
+        zero_d.Paths(paths.root, paths.geometry, paths.voronoi, paths.solves, paths.coupled),
+        Path(args.old_1d_inlet)
+    )
+
 
     for k in range(args.max_iters):
         print(f"\n========== Iteration k={k} ==========")
         # 1) Geometry
         if args.stl_file is None:
             # Use existing geometry outputs if present; otherwise require STL
-            if not (paths.geometry / "tagged_branches.bp").exists():
-                _die("--stl-file is required because geometry/tagged_branches.bp is missing")
+            if not (paths.geometry / "tagged_branches_inlet.bp").exists():
+                _die("--stl-file is required because geometry/tagged_branches_inlet.bp is missing")
         else:
             run_geometry(paths, Path(args.stl_file), run_i=k)
 
@@ -379,8 +447,35 @@ def main():
             break
 
         # 5) Update resistances -> new 1D card at run_{k+1}
-        update_resistances(paths, run_i=k, run_next=k+1)
+        if k%2 == 0:
+            print("[info] Odd iteration: skipping resistance update to avoid oscillations.")
+            print("[info] Instead, updating outlet pressures via 0D solver.")
+            # 6) Run 0D solver to update outlet pressures
+            assign_path = Path(args.assign_pressures_script)
+            zero_d.outlet_stage_iter(
+                zero_d.Paths(paths.root, paths.geometry, paths.voronoi, paths.solves, paths.coupled),
+                run_i=k, run_next=k+1,
+                assign_script=assign_path if assign_path.exists() else None,
+                svzerodsolver=args.svzerodsolver,
+                one_d_solver_cmd=args.one_d_solver_cmd,
+                node_scale=float(args.node_scale),
+                mbf_field="mbf_qTi_tagconst",
+            )
+            (paths.coupled / f"run_{k+1}/inlet").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(paths.coupled / f"run_{k}/inlet/1d_simulation_input.json",
+                         paths.coupled / f"run_{k+1}/inlet/1d_simulation_input.json")
 
+        else:
+            print("[info] Even iteration: skipping pressure update to avoid oscillations.")
+            print("[info] Even iteration: updating resistances.")
+            update_resistances(paths, run_i=k, run_next=k+1)
+            (paths.coupled / f"run_{k+1}/outlet").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(paths.coupled / f"run_{k}/solver_0d_new.in",
+                         paths.coupled / f"run_{k+1}/solver_0d_new.in")
+            shutil.copy2(paths.coupled / f"run_{k}/outlet/1d_simulation_input.json",
+                         paths.coupled / f"run_{k+1}/outlet/1d_simulation_input.json")
+
+        
         # 6) Re-run 1D solver to produce new inlet outputs in run_{k+1}
         run_1d_solver(args.one_d_solver_cmd, paths, run_next=k+1)
 
