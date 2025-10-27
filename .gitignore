@@ -9,6 +9,10 @@ clones/
 *.csv
 *.bp/
 src/coupled/
+src/coupled_1d_0d/
+src/coupled_1d_1d/
+src/coupled_both/
+src/coupled_keep/
 src/coupled_100_15mmHg_0.05/
 src/coupled_old/
 *.txt
