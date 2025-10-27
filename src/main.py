@@ -26,14 +26,18 @@ else:
     obj.implicit()
     obj.forest_build(number_of_networks=num_networks, trees_per_network=trees_per_network)
     if rom  == 0:
-        obj.export_forest_0d_files(num_cardiac_cycles=3, num_time_pts_per_cycle=5, distal_pressure=0.0)
-        obj.run_0d_simulation()
-        obj.plot_0d_results_to_3d()
-    else:
+            # For pure 0D-0D coupling
+            obj.export_tree_0d_files(modify_bc=True, treeID=0, scaled=False, P=[35.0*1333.22, 35*1333.22], Q=[0.05/60, 0.05/60])
+            obj.run_0d_simulation(modify_bc=True, forest=True, treeID=0)
+            obj.export_tree_0d_files(modify_bc=True, treeID=1)
+            obj.run_0d_simulation(modify_bc=True, forest=True, treeID=1)
+            obj.plot_0d_results_to_3d_forest_both()
         # obj.export_forest_0d_files(num_cardiac_cycles=3, num_time_pts_per_cycle=5, distal_pressure=0.0)
-        obj.export_tree_0d_files(modify_bc=True)
-        obj.run_0d_simulation(modify_bc=True)
-        obj.plot_0d_results_to_3d()
-        obj.export_forest_1d_files()
-        obj.run_forest_inlet_1d_simulation()
-        obj.run_forest_outlet_1d_simulation()
+    else:
+            # For 1D-0D-1D coupling
+            obj.export_tree_0d_files(modify_bc=True, treeID=1)
+            obj.run_0d_simulation(modify_bc=True, forest=True, treeID=1)
+            obj.plot_0d_results_to_3d_forest()
+            obj.export_forest_1d_files()
+            obj.run_forest_inlet_1d_simulation()
+            obj.run_forest_outlet_1d_simulation()
