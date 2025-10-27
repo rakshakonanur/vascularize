@@ -387,6 +387,10 @@ def load_vtp(directory):
     
     # Get a sorted list of all VTP files
     vtp_files = sorted(glob.glob(os.path.join(directory, "*.vtp")), key=lambda x: int(re.findall(r'\d+', x)[-1]))
+
+    # if no files found, raise error
+    if not vtp_files:
+        vtp_files = sorted(glob.glob(os.path.join(directory+os.sep+"timeseries", "*.vtp")), key=lambda x: int(re.findall(r'\d+', x)[-1]))
     all_data = []
     points_per_section = 20  # Number of points per section to average
 
@@ -398,6 +402,8 @@ def load_vtp(directory):
         if file.endswith("centerlines.vtp"):
             continue
         if file.endswith("1d_model.vtp"):
+            continue
+        if file.endswith("total.vtp"):
             continue
         print(f"Reading: {file}")
         reader = vtk.vtkXMLPolyDataReader()
@@ -427,8 +433,8 @@ def load_vtp(directory):
 
 
         area = timestep_data["point_data"]["Area"]  # (N,)
+        area = timestep_data["point_data"]["Area"]  # (N,)
         flowrate_1d = timestep_data["point_data"]["Flowrate"]  # (N,)
-        reynolds_1d = timestep_data["point_data"]["Reynolds"]  # (N,)
         pressure_1d = timestep_data["point_data"]["Pressure_mmHg"]  # (N,)
         mesh_3d_coords = timestep_data["coords"]  # (N, 3)
 
@@ -573,10 +579,10 @@ if __name__ == "__main__":
     # perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/syntheticVasculature/files/geometry/cermRaksha_scaled.stl",
     #                             branching_data_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/090425/Run2_50branches/1D_Input_Files/branchingData.csv")
     perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/vascularize/files/geometry/cermRaksha_scaled_big.stl",
-                                output_1d_inlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/1D_Input_Files/inlet",
-                                output_1d_outlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/1D_Input_Files/outlet",
-                                branching_data_inlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/branchingData_0.csv",
-                                branching_data_outlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/branchingData_1.csv",
+                                output_1d_inlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/0D_Output/102225/Run1_10branches/0D_Input_Files/inlet",
+                                output_1d_outlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/0D_Output/102225/Run1_10branches/0D_Input_Files/outlet",
+                                branching_data_inlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/0D_Output/102225/Run1_10branches/branchingData_0.csv",
+                                branching_data_outlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/0D_Output/102225/Run1_10branches/branchingData_1.csv",
                                 single=False,
                                 init=True
                                 )
