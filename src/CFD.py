@@ -120,17 +120,30 @@ class CFD:
         self.cerm_forest = cerm_forest
 
     def export_tree_0d_files(self, num_cardiac_cycles = 1, num_time_pts_per_cycle = 5, distal_pressure = 0.0, modify_bc = False,
-                             Q=[-0.025/60,-0.025/60], P=[0,0], t=[0,1]): # export 0d files required for simulation
+                            treeID = 1,
+                             Q=[-0.025/60,-0.025/60], P=[0,0], t=[0,1], scaled=False): # export 0d files required for simulation
         if not hasattr(self, 'cerm_tree'):
-            cerm_tree = self.cerm_forest.networks[0][1] # outlet tree of the first network
+            cerm_tree = self.cerm_forest.networks[0][treeID] # outlet tree of the first network
+            if treeID == 0:
+                fold = "inlet"
+            else:
+                fold = "outlet"
+            folder = self.parameters['folder'] + os.sep + fold
         else:
             cerm_tree = self.cerm_tree
+            folder = self.parameters['folder']
+
         path_to_0d_solver = self.parameters['path_to_0d_solver']
         outdir = self.parameters['outdir']
-        folder = self.parameters['folder']
+    
         from svv.simulation.fluid.rom.zero_d.zerod_tree import export_0d_simulation
         # sim = Simulation(tree=cerm_tree)
-        export_0d_simulation(tree=cerm_tree, get_0d_solver=False, path_to_0d_solver=path_to_0d_solver,outdir=outdir,folder=folder,number_cardiac_cycles=num_cardiac_cycles,number_time_pts_per_cycle=num_time_pts_per_cycle,distal_pressure=distal_pressure, geom_filename="geom.csv")
+        export_0d_simulation(tree=cerm_tree, get_0d_solver=False, path_to_0d_solver=path_to_0d_solver,outdir=outdir,folder=folder,number_cardiac_cycles=num_cardiac_cycles,
+                             number_time_pts_per_cycle=num_time_pts_per_cycle,distal_pressure=distal_pressure, geom_filename="geom.csv", scaled=scaled)
+        if scaled:
+            edit_flows = False
+        else:
+            edit_flows = True
 
         if modify_bc:
             from convert_0d_bc import transform_flow_to_pressure_inlet_and_flow_outlets
@@ -143,6 +156,7 @@ class CFD:
                 P_series=P,
                 t_series=t,
                 Q_series_for_outlets=Q,
+                edit_flows=edit_flows
             )
 
             # Save
@@ -160,9 +174,15 @@ class CFD:
         from svv.simulation.fluid.rom.zero_d.zerod_forest import export_0d_simulation
         networks = export_0d_simulation(forest=cerm_forest, network_id=0, inlets=[0,], get_0d_solver=True, path_to_0d_solver=path_to_0d_solver, outdir=outdir, folder=folder, number_cardiac_cycles=num_cardiac_cycles, number_time_pts_per_cycle=num_time_pts_per_cycle, distal_pressure=distal_pressure)
 
-    def run_0d_simulation(self, modify_bc=False): # run 0d simulation
+    def run_0d_simulation(self, modify_bc=False, forest=False, treeID=1): # run 0d simulation
         import pysvzerod
         outputDir = self.parameters['outdir'] + os.sep + self.parameters['folder']
+        if forest:
+            if treeID == 0:
+                folder = "inlet"
+            else:
+                folder = "outlet"
+            outputDir = outputDir + os.sep + folder
 
         exe = "svzerodsolver"
         if modify_bc:
@@ -180,6 +200,20 @@ class CFD:
     def plot_0d_results_to_3d(self): # export 0d results to 3d
         os.chdir(self.parameters['outdir'] + os.sep + self.parameters['folder'])
         fileName = self.parameters['outdir'] + os.sep + self.parameters['folder'] + os.sep + 'plot_0d_results_to_3d.py'
+        subprocess.run(['python', fileName])
+
+    def plot_0d_results_to_3d_forest(self): # export 0d results to 3d
+        os.chdir(self.parameters['outdir'] + os.sep + self.parameters['folder'] + os.sep + 'outlet')
+        fileName = self.parameters['outdir'] + os.sep + self.parameters['folder'] + os.sep + 'outlet' + os.sep + 'plot_0d_results_to_3d.py'
+        subprocess.run(['python', fileName])
+
+
+    def plot_0d_results_to_3d_forest_both(self): # export 0d results to 3d
+        os.chdir(self.parameters['outdir'] + os.sep + self.parameters['folder'] + os.sep + 'inlet')
+        fileName = self.parameters['outdir'] + os.sep + self.parameters['folder'] + os.sep + 'inlet' + os.sep + 'plot_0d_results_to_3d.py'
+        subprocess.run(['python', fileName])
+        os.chdir(self.parameters['outdir'] + os.sep + self.parameters['folder'] + os.sep + 'outlet')
+        fileName = self.parameters['outdir'] + os.sep + self.parameters['folder'] + os.sep + 'outlet' + os.sep + 'plot_0d_results_to_3d.py'
         subprocess.run(['python', fileName])
 
     def export_tree_1d_files(self,number_cardiac_cycles = 5,num_points=1000): # export 1d files required for simulation
@@ -345,7 +379,7 @@ class CFD:
         sys.argv = [
             "assign_outlet_pressures.py",
             "--deck", fileName,
-            "--output", self.parameters['outdir']  + os.sep + self.parameters['folder'] + os.sep + "output.csv",
+            "--output", self.parameters['outdir']  + os.sep + self.parameters['folder'] + os.sep + "outlet" + os.sep + "output.csv",
             "--branching", self.parameters['outdir']  + os.sep + "branchingData_1.csv",
         ]
         main()
