@@ -73,29 +73,58 @@ def import_pressure_data(self, pres_file: str, k: int = 1):
     print(f"Imported {len(p_series)} time steps from {pres_file}", flush=True)
     return p_series
 
-def import_flow_data(self, flow_file: str):
+def import_flow_data(self, flow_file: str, cell_tags: np.ndarray):
     """
     Import flow data from an XDMF file.
     """
-    # mesh = adios4dolfinx.read_mesh(filename = flow_file, comm=MPI.COMM_WORLD)
-    ts = adios4dolfinx.read_timestamps(filename = flow_file, comm=MPI.COMM_WORLD, function_name="q_src_density")
-    DG0 = fem.functionspace(self.mesh, element("DG", self.mesh.basix_cell(), 0))
-    q_src = fem.Function(DG0)
+    comm = MPI.COMM_WORLD
 
-    q_series = []
+    # --- read timesteps and last field ---
+    ts = adios4dolfinx.read_timestamps(filename=flow_file, comm=comm, function_name="q_src_density")
+    V = fem.functionspace(self.mesh, ("DG", 0))
+    q_src = fem.Function(V)
+
     for t in ts:
         adios4dolfinx.read_function(flow_file, q_src, name="q_src_density", time=t)
-        q_src.x.array[:] = q_src.x.array      
         q_src.x.scatter_forward()
-        q_series.append(q_src.copy())
+    # q_src now holds the last time step
 
-    with io.XDMFFile(MPI.COMM_WORLD, current_dir/"out_darcy/import_q_src.xdmf", "w") as file:
-        file.write_mesh(self.mesh)
-        file.write_function(q_series[-1])
+    # optional: write for inspection
+    out_dir = Path("out_darcy"); out_dir.mkdir(parents=True, exist_ok=True)
+    with io.XDMFFile(comm, out_dir / "import_q_src.xdmf", "w") as xdmf:
+        xdmf.write_mesh(self.mesh)
+        xdmf.write_function(q_src)
 
-    print(f"Imported {len(q_series)} time steps from {flow_file}", flush=True)
-    print(f"Total flow rate in last time step: {np.sum(np.unique(q_series[-1].x.array))}", flush=True)
-    return np.sum(np.unique(q_series[-1].x.array))
+    # --- compute per-tag value (average over the tag) ---
+    # Since q_src is DG0 and constant per tag (by your setup), this equals that constant.
+    dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=cell_tags)
+
+    # gather unique tags across ranks
+    local_tags = np.unique(cell_tags.values)
+    all_tags = np.unique(np.concatenate(comm.allgather(local_tags)))
+
+    per_tag_value = {}
+    for tag in all_tags:
+        # numerator: ∫_tag q_src dx
+        num_local = fem.assemble_scalar(fem.form(q_src * dx(tag)))
+        # denominator: ∫_tag 1 dx  (the measure of the tag)
+        den_local = fem.assemble_scalar(fem.form(1.0 * dx(tag)))
+
+        num = comm.allreduce(num_local, op=MPI.SUM)
+        den = comm.allreduce(den_local, op=MPI.SUM)
+
+        if den > 0.0:
+            per_tag_value[int(tag)] = float(num / den)  # constant per tag
+        else:
+            # tag absent on the global mesh; skip
+            continue
+
+    if comm.rank == 0:
+        print(f"Read {len(ts)} time steps from {flow_file}")
+        print("Per-tag values:", per_tag_value)
+
+    # Return ONLY the per-tag constants (no sum)
+    return float(sum(per_tag_value.values()))
 
 
 def _cell_volumes_Q0(mesh) -> np.ndarray:
@@ -364,7 +393,7 @@ class PerfusionSolver:
         _, self.outlet_cell_tags = import_mesh(mesh_outlet_file)
         self.p_src = import_pressure_data(self, pres_inlet_file, k=self.element_degree)
         self.p_snk = import_pressure_data(self, pres_outlet_file, k=self.element_degree)
-        self.flow = import_flow_data(self, flow_inlet_file) + import_flow_data(self, flow_outlet_file)
+        self.flow = import_flow_data(self, flow_inlet_file, self.inlet_cell_tags) + import_flow_data(self, flow_outlet_file, self.outlet_cell_tags)
         print(f"Total flow rate from both inlet and outlet: {self.flow} cm^3/s", flush=True)
         
 
