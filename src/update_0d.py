@@ -115,6 +115,7 @@ def _find_outlet_folder(old_base: Path) -> Path:
     candidates = [
         old_base / "folder",
         old_base / "outlet",
+        old_base / "inlet",
         old_base,  # sometimes the file is right in the parent
     ]
     for c in candidates:
@@ -126,21 +127,26 @@ def _find_outlet_folder(old_base: Path) -> Path:
     _die(f"Could not find solver_0d_new.in under {old_base}")
 
 
-def prepare_outlet_run0(paths: Paths, old_inlet: Path):
+def prepare_outlet_run0(paths: Paths, old_inlet: Path, old_outlet: Path):
     """
     Seed outlet pipeline from the folder next to --old-1d-inlet:
       - copy <old_base>/[folder|outlet|…] -> coupled/run_0/outlet
       - copy <old_base>/branchingData_1.csv -> coupled/run_0/branchingData_1.csv
     """
-    old_base = old_inlet.resolve().parent
-    src_folder = _find_outlet_folder(old_base)
-    dst = paths.coupled / "run_0"
+    src_folder = old_inlet.resolve()
+    dst = paths.coupled / "run_0" / "inlet"
     _ensure_dir(dst.parent)
     _copytree(src_folder, dst)
-    csv_src = src_folder.parent / "branchingData_0.csv"
+    if old_outlet:
+        snk_folder = old_outlet.resolve()
+        dst_snk = paths.coupled / "run_0" / "outlet"
+        _ensure_dir(dst_snk.parent)
+        _copytree(snk_folder, dst_snk)
+    csv_src = src_folder.parent.parent / "branchingData_0.csv"
+    print(f"[0D] Found branchingData_0.csv at {csv_src}")
     if not csv_src.exists():
         _die(f"Missing branchingData_0.csv at {csv_src}")
-    csv_snk = old_base.parent / "branchingData_1.csv"
+    csv_snk = src_folder.parent.parent / "branchingData_1.csv"
     if not csv_snk.exists():
         _die(f"Missing branchingData_1.csv at {csv_snk}")
     (paths.coupled / "run_0" / "branchingData_0.csv").write_text(csv_src.read_text())
@@ -158,6 +164,7 @@ def outlet_stage_iter(
     one_d_solver_cmd: str | None = None,
     node_scale: float = 1.0,
     mbf_field: str = "mbf_qTi_tagconst",
+    inlet: bool = False,
 ):
     """
     One outlet iteration:
@@ -169,9 +176,19 @@ def outlet_stage_iter(
       6) Run assign_pressure_bcs.py (if provided) to push pressures to 1D.
       7) Optionally run outlet 1D with updated 1D card → run_{run_next}/outlet_1d/.
     """
+    if not inlet:
+        branching_csv = "branchingData_1.csv"
+        mbf_file = "mbf_outlet.bp"
+        territories_file = "territories_outlet.xdmf"
+        folder = "outlet"
+    else:
+        branching_csv = "branchingData_0.csv"
+        mbf_file = "mbf_inlet.bp"
+        territories_file = "territories_inlet.xdmf"
+        folder = "inlet"
     # sources
-    mbf_bp   = paths.solves/"out_darcy"  / "mbf_outlet.bp"
-    terr_xdmf= paths.voronoi / "territories_outlet.xdmf"
+    mbf_bp   = paths.solves/"out_darcy"  / mbf_file
+    terr_xdmf= paths.voronoi / territories_file
     if not mbf_bp.exists(): _die(f"Missing {mbf_bp}")
     if not terr_xdmf.exists(): _die(f"Missing {terr_xdmf}")
 
@@ -188,7 +205,7 @@ def outlet_stage_iter(
     else:
         _die(f"Size mismatch: {mbf_bp} var {mbf_field} has {arr.size} values; mesh has {cell_tags.size} cells and {uniq_tags.size} tags")
 
-    term_csv = paths.coupled / "run_0" / "branchingData_1.csv"
+    term_csv = paths.coupled / "run_0" / branching_csv
     if not term_csv.exists(): _die(f"Missing terminals CSV: {term_csv}")
     terms: List[Tuple[int, np.ndarray]] = []
     with open(term_csv, "r", newline="") as f:
@@ -209,15 +226,15 @@ def outlet_stage_iter(
                 bid = int(str(bid_str).strip())
                 dx = float(row.get("distalCoordsX")); dy = float(row.get("distalCoordsY")); dz = float(row.get("distalCoordsZ"))
                 terms.append((bid, node_scale*np.array([dx,dy,dz], float)))
-    if not terms: _die("No terminal rows in branchingData_1.csv")
+    if not terms: _die(f"No terminal rows in {branching_csv}")
 
     term_xyz = np.vstack([xyz for _, xyz in terms])
     centroids = _cell_centroids(mesh)
     term_tags = _nearest_tags_for_points(term_xyz, centroids, tags)
 
     # update 0D card (k → k+1)
-    src_card = paths.coupled / f"run_{run_i}"   /  "solver_0d_new.in"
-    dst_dir  = paths.coupled / f"run_{run_next}" 
+    src_card = paths.coupled / f"run_{run_i}"   /  folder /"solver_0d_new.in"
+    dst_dir  = paths.coupled / f"run_{run_next}" / folder
     _ensure_dir(dst_dir)
     dst_card = dst_dir / "solver_0d_new.in"
     if not src_card.exists(): _die(f"Missing 0D card: {src_card}")
@@ -266,6 +283,8 @@ def outlet_stage_iter(
     #     print("[0D] assign_pressure_bcs.py done.")
     # else:
     #     print("[0D] assign script not provided or missing — skipping.")
+
+def run_updated_1d_solver(paths: Paths, run_i: int, run_next: int):
     from assign_pressure_bcs import main
     (paths.coupled / f"run_{run_next}/outlet").mkdir(parents=True, exist_ok=True)
     shutil.copy2(paths.coupled / f"run_{run_i}/outlet/1d_simulation_input.json", 
@@ -275,7 +294,7 @@ def outlet_stage_iter(
     sys.argv = [
         "assign_outlet_pressures.py",
         "--deck", str(paths.coupled / f"run_{run_next}/outlet/1d_simulation_input.json"),
-        "--output", str(paths.coupled / f"run_{run_next}/output.csv"),
+        "--output", str(paths.coupled / f"run_{run_next}/outlet/output.csv"),
         "--branching", str(paths.coupled / "run_0/branchingData_1.csv"),
     ]
     main()
