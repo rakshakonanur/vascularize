@@ -398,9 +398,9 @@ def append_progress(paths: Paths, it: int, stats: dict, tol: float):
 def main():
     ap = argparse.ArgumentParser(description="Coupled 1D-NS <-> Darcy pipeline")
     ap.add_argument("--project-root", default=".", help="Path to src/ (contains geometry/, voronoi/, solves/)")
-    ap.add_argument("--old-1d-inlet", default="../output/Forest_Output/0D_Output/102325/Run4_10branches/0D_Input_Files/inlet",
+    ap.add_argument("--old-1d-inlet", default="../output/Forest_Output/1D_Output/102925/Run11_10branches_0d_0d/1D_Input_Files/inlet",
                     help="Path to existing 1D inlet folder to seed run_0 (contains 1d_simulation_input.json)")
-    ap.add_argument("--old-1d-outlet", default="../output/Forest_Output/0D_Output/102325/Run4_10branches/0D_Input_Files/outlet",
+    ap.add_argument("--old-1d-outlet", default="../output/Forest_Output/1D_Output/102925/Run11_10branches_0d_0d/1D_Input_Files/outlet",
                     help="Path to existing 1D outlet folder to seed run_0 (contains 1d_simulation_input.json)")
     ap.add_argument("--stl-file", default="../files/geometry/cermRaksha_scaled_big.stl",
                     help="Path to cermRaksha_scaled_big.stl (if omitted, will try geometry/branched_network.xdmf route)")
@@ -413,7 +413,7 @@ def main():
     ap.add_argument("--node-scale", type=float, default=1.0,
                 help="Scale distal coords if CSV is not in meters (e.g., 0.001 for mm)")
     ap.add_argument("--tol", type=float, default=0.01, help="Convergence tolerance on relative flow (default 1%)")
-    ap.add_argument("--max-iters", type=int, default=20, help="Max coupling iterations")
+    ap.add_argument("--max-iters", type=int, default=100, help="Max coupling iterations")
     ap.add_argument("--node-tol", type=float, default=1e-6, help="Node matching tolerance for Voronoi seeding")
     ap.add_argument("--mesh-file", default="geometry/bioreactor.xdmf", help="Path to mesh file")
     args = ap.parse_args()
@@ -449,7 +449,7 @@ def main():
         run_tesselate(paths, run_i=k, node_tol=args.node_tol)
 
         # 3) Darcy solver (init=True for k==0)
-        run_darcy(paths, init=(k == 0), run_i=k)
+        run_darcy(paths, init=(k==0), run_i=k)
 
         # 4) Compare q and decide
         try:
