@@ -96,10 +96,10 @@ class CFD:
         cerm_forest.set_domain(cermSurf)
         params_inlet = TreeParameters(terminal_pressure=20.0*1333.22,
                         root_pressure=35.0*1333.22,
-                        terminal_flow=0.05/60)
+                        terminal_flow=0.0020/60)
         params_outlet = TreeParameters(terminal_pressure=0.0*1333.22,
                         root_pressure=5.0*1333.22,
-                        terminal_flow=0.025/60)
+                        terminal_flow=0.0020/60)
         # for i in range(number_of_networks):
         #     for j in range(trees_per_network[i]):
         #         cerm_forest.networks[i][j].parameters = params
@@ -121,7 +121,7 @@ class CFD:
 
     def export_tree_0d_files(self, num_cardiac_cycles = 1, num_time_pts_per_cycle = 5, distal_pressure = 0.0, modify_bc = False,
                             treeID = 1,
-                             Q=[-0.025/60,-0.025/60], P=[0,0], t=[0,1], scaled=False): # export 0d files required for simulation
+                             Q=[-0.0020/60,-0.0020/60], P=[0,0], t=[0,1], scaled=False): # export 0d files required for simulation
         if not hasattr(self, 'cerm_tree'):
             cerm_tree = self.cerm_forest.networks[0][treeID] # outlet tree of the first network
             if treeID == 0:
