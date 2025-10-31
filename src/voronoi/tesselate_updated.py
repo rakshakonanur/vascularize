@@ -227,7 +227,7 @@ def laguerre_weights_from_diameters(diameters: np.ndarray, mode: str = "d2", kap
 def label_cells_by_laguerre(
     mesh: dmesh.Mesh,
     seed_points: np.ndarray,   # shape (N,3)
-    seed_diameters: np.ndarray,# shape (N,)
+    seed_weights: np.ndarray,# shape (N,)
     weight_mode: str = "d2",
     kappa: float = 1.0,
     tie_break: str = "smallest_index"
@@ -248,7 +248,7 @@ def label_cells_by_laguerre(
 
     # Prepare weights
     seeds = np.asarray(seed_points, dtype=np.float64)
-    w = laguerre_weights_from_diameters(np.asarray(seed_diameters, float), mode=weight_mode, kappa=kappa)
+    w = laguerre_weights_from_diameters(np.asarray(seed_weights, float), mode=weight_mode, kappa=kappa)
 
     # Compute argmin_i (||x - s_i||^2 - w_i) for all local cells
     # Vectorized in chunks to save memory if N is large
@@ -322,6 +322,26 @@ except Exception as _e:
 
 def read_1d_mesh_from_bp(bp_mesh_path: str, comm=MPI.COMM_WORLD):
     return adios4dolfinx.read_mesh(bp_mesh_path, comm=comm)
+
+def read_last_step_bp_array(mesh, bp_path: Path, function_name: str) -> np.ndarray:
+    """
+    Read the last-step array from a .bp (ADIOS2) file by picking the first non-scalar var.
+    This is a heuristic but works for typical DG0 time series written with adios4dolfinx.
+
+    Returns a 1D numpy array.
+    """
+
+    ts = adios4dolfinx.read_timestamps(filename = bp_path, comm=MPI.COMM_WORLD, function_name=function_name)
+    P1    = dfx.fem.functionspace(mesh, ("CG", 1))
+    q_src = fem.Function(P1)
+    q_series = []
+    for t in ts:
+        adios4dolfinx.read_function(bp_path, q_src, name=function_name, time=ts[-1])
+        q_src.x.array[:] = q_src.x.array       
+        q_series.append(q_src.copy())
+
+    print(f"Imported {len(q_series)} time steps from {bp_path}", flush=True)
+    return q_series[-1].x.array.copy()
 
 def map_seeds_to_1d_nodes(mesh_1d, seeds_xyz, tol: float = 1e-6):
     X1 = mesh_1d.geometry.x  # (n_nodes, gdim)
@@ -554,12 +574,53 @@ def assign_and_write_sources(
     cells_painted = np.count_nonzero(p_src_func.x.array > 0)
     print(f"painted {cells_painted}/{ncells} cells ({100*cells_painted/ncells:.1f}%) with p_src")
 
+def terminal_outflow(
+        seed_xyz: np.ndarray,
+        seeds_df: pd.DataFrame,
+        mesh_bp: str,    
+        flow_bp: str,
+        node_match_tol: float = 1e-6,
+        verbose = True,
+        comm=MPI.COMM_WORLD,
+        
+):
+    rank = comm.rank
+    seed_row_index = np.arange(len(seeds_df), dtype=np.int64)
+
+    # Row index after reset_index in the loader is our canonical "seed position"
+    # (0..N-1 order used during tessellation)
+    seed_row_index = np.arange(len(seeds_df), dtype=np.int64)
+
+    # Read mesh
+    mesh_1d = adios4dolfinx.read_mesh(mesh_bp, comm=comm)
+
+    # Read the last time point from the flow files
+    u_last = read_last_step_bp_array(mesh_1d, flow_bp, function_name="f")
+
+        # ---------------- 3) Map seeds -> nearest 1D node ----------------
+    node_ids, found = map_seeds_to_1d_nodes(mesh_1d, seed_xyz, tol=node_match_tol)
+
+    if not np.all(found) and rank == 0:
+        missing = np.where(~found)[0]
+        print(f"[warn] {missing.size} seeds did not match a 1D node within tol={node_match_tol}. Skipping those seeds.")
+
+    valid_idx = np.where(found)[0]
+    node_ids_valid = np.asarray(node_ids)[valid_idx]
+    seed_rows_valid = seed_row_index[valid_idx]   # positions into the seed list
+
+    if verbose and rank == 0:
+        print(f"[map] matched {len(seed_rows_valid)}/{len(seeds_df)} seeds to 1D nodes.")
+
+    print("Node ids valid: ", node_ids_valid)
+    print("Seed rows valid: ", seed_rows_valid)
+    print("Print terminal velocities: ", u_last[node_ids_valid])
+    return u_last[node_ids_valid]
 
 if __name__ == "__main__":
     # Optional CLI defaults; change these paths as needed
     import os
-    csv_inlet_path   = os.environ.get("SEEDS_INLET_CSV", "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/branchingData_0.csv")
-    csv_outlet_path  = os.environ.get("SEEDS_OUTLET_CSV", "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/101725/Run2_10branches/branchingData_1.csv") 
+    csv_inlet_path   = os.environ.get("SEEDS_INLET_CSV", "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/102925/Run11_10branches_0d_0d/branchingData_0.csv")
+    csv_outlet_path  = os.environ.get("SEEDS_OUTLET_CSV", "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/102925/Run11_10branches_0d_0d/branchingData_1.csv") 
     terr_inlet_xdmf  = os.environ.get("TERRITORIES_INLET_XDMF", "territories_inlet.xdmf")
     terr_outlet_xdmf = os.environ.get("TERRITORIES_OUTLET_XDMF", "territories_outlet.xdmf") 
     mesh_inlet_bp    = os.environ.get("MESH_INLET_BP", "../geometry/tagged_branches_inlet.bp")
@@ -606,6 +667,7 @@ if __name__ == "__main__":
         mesh = xdmf.read_mesh(name="Grid")
         fdim = mesh.topology.dim - 1  # Facet dimension
         mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
+
     labels_local, uniq = label_cells_by_laguerre(mesh, inlet_seed_points_for_laguerre, inlet_seed_diameters,
                                                  weight_mode="d2", kappa=1.0)
     cell_tags = make_cell_meshtags(mesh, labels_local)
