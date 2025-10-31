@@ -35,6 +35,8 @@ else:
         # obj.export_forest_0d_files(num_cardiac_cycles=3, num_time_pts_per_cycle=5, distal_pressure=0.0)
     else:
             # For 1D-0D-1D coupling
+            obj.export_tree_0d_files(modify_bc=True, treeID=0, scaled=False, P=[50.0*1333.22, 50*1333.22], Q=[0.002/60, 0.0020/60])
+            obj.run_0d_simulation(modify_bc=True, forest=True, treeID=0)
             obj.export_tree_0d_files(modify_bc=True, treeID=1)
             obj.run_0d_simulation(modify_bc=True, forest=True, treeID=1)
             obj.plot_0d_results_to_3d_forest()
