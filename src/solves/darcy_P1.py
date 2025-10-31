@@ -357,6 +357,7 @@ def single_compartment(self, source_pressures, sink_pressures):
     volume_form = fem.form(vol * dx)  # Volume integral form
     V_bio = dfx.fem.assemble_scalar(volume_form)  # Assemble integral of v
     print(f"Mesh volume: {V_bio}", flush=True) # Volume of the bioreactor
+    metabolic_demand = Q_bio/V_bio  # metabolic demand, cm^3/s/g (set to 0.5/60 for 0.5 ml/min/g)
 
     Pcap = 15*1333.22  # Capillary pressure, converted to dyne/cm^2
     Psnk = sink_pressures # Sink pressure
@@ -369,8 +370,11 @@ def single_compartment(self, source_pressures, sink_pressures):
     Psnk_avg = np.mean(Psnk_values)
     print(f"Average pressure at outlets: {Psrc_avg}", flush=True)
 
-    beta_src = (Q_bio / V_bio) * (1/(Psrc_avg -Pcap)) # Source term coefficient
-    beta_snk = (Q_bio / V_bio) * (1/(Pcap - Psnk_avg))  # Sink term coefficient
+    # beta_src = (Q_bio / V_bio) * (1/(Psrc_avg -Pcap)) # Source term coefficient
+    # beta_snk = (Q_bio / V_bio) * (1/(Pcap - Psnk_avg))  # Sink term coefficient
+
+    beta_src = (metabolic_demand) * (1/(Psrc_avg -Pcap)) # Source term coefficient
+    beta_snk = (metabolic_demand) * (1/(Pcap - Psnk_avg))  # Sink term coefficient
 
     # Psnk_c = dfx.fem.Constant(self.mesh, PETSc.ScalarType(Psnk))
     beta_src_c = dfx.fem.Constant(self.mesh, PETSc.ScalarType(beta_src))
@@ -393,7 +397,7 @@ class PerfusionSolver:
         _, self.outlet_cell_tags = import_mesh(mesh_outlet_file)
         self.p_src = import_pressure_data(self, pres_inlet_file, k=self.element_degree)
         self.p_snk = import_pressure_data(self, pres_outlet_file, k=self.element_degree)
-        self.flow = import_flow_data(self, flow_inlet_file, self.inlet_cell_tags) + import_flow_data(self, flow_outlet_file, self.outlet_cell_tags)
+        self.flow = import_flow_data(self, flow_inlet_file, self.inlet_cell_tags) # + import_flow_data(self, flow_outlet_file, self.outlet_cell_tags)
         print(f"Total flow rate from both inlet and outlet: {self.flow} cm^3/s", flush=True)
         
 
