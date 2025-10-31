@@ -579,10 +579,10 @@ if __name__ == "__main__":
     # perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/syntheticVasculature/files/geometry/cermRaksha_scaled.stl",
     #                             branching_data_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/090425/Run2_50branches/1D_Input_Files/branchingData.csv")
     perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/vascularize/files/geometry/cermRaksha_scaled_big.stl",
-                                output_1d_inlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/0D_Output/102225/Run1_10branches/0D_Input_Files/inlet",
-                                output_1d_outlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/0D_Output/102225/Run1_10branches/0D_Input_Files/outlet",
-                                branching_data_inlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/0D_Output/102225/Run1_10branches/branchingData_0.csv",
-                                branching_data_outlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/0D_Output/102225/Run1_10branches/branchingData_1.csv",
+                                output_1d_inlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/103025/Run1_1branches/1D_Input_Files/inlet",
+                                output_1d_outlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/103025/Run1_1branches/1D_Input_Files/outlet",
+                                branching_data_inlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/103025/Run1_1branches/branchingData_0.csv",
+                                branching_data_outlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/103025/Run1_1branches/branchingData_1.csv",
                                 single=False,
                                 init=True
                                 )
