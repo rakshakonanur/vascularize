@@ -249,6 +249,8 @@ def outlet_stage_iter(
             _die(f"Missing flow for territory tag {t}")
         branch_flow[int(bid)] = float(flows_by_tag[t])
 
+    print(f"[0D] Flow rates: {branch_flow}")
+
     found = set()
     for bc in bcs:
         if bc.get("bc_type") != "FLOW": continue
