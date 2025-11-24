@@ -127,19 +127,19 @@ def _find_outlet_folder(old_base: Path) -> Path:
     _die(f"Could not find solver_0d_new.in under {old_base}")
 
 
-def prepare_outlet_run0(paths: Paths, old_inlet: Path, old_outlet: Path):
+def prepare_outlet_run0(paths: Paths, old_inlet: Path, old_outlet: Path, k: int):
     """
     Seed outlet pipeline from the folder next to --old-1d-inlet:
       - copy <old_base>/[folder|outlet|…] -> coupled/run_0/outlet
       - copy <old_base>/branchingData_1.csv -> coupled/run_0/branchingData_1.csv
     """
     src_folder = old_inlet.resolve()
-    dst = paths.coupled / "run_0" / "inlet"
+    dst = paths.coupled / f"run_{k}" / "inlet"
     _ensure_dir(dst.parent)
     _copytree(src_folder, dst)
     if old_outlet:
         snk_folder = old_outlet.resolve()
-        dst_snk = paths.coupled / "run_0" / "outlet"
+        dst_snk = paths.coupled / f"run_{k}" / "outlet"
         _ensure_dir(dst_snk.parent)
         _copytree(snk_folder, dst_snk)
     csv_src = src_folder.parent.parent / "branchingData_0.csv"
@@ -149,9 +149,9 @@ def prepare_outlet_run0(paths: Paths, old_inlet: Path, old_outlet: Path):
     csv_snk = src_folder.parent.parent / "branchingData_1.csv"
     if not csv_snk.exists():
         _die(f"Missing branchingData_1.csv at {csv_snk}")
-    (paths.coupled / "run_0" / "branchingData_0.csv").write_text(csv_src.read_text())
-    (paths.coupled / "run_0" / "branchingData_1.csv").write_text(csv_snk.read_text())
-    print(f"[0D] Prepared outlet run_0: {dst} and branchingData_1.csv")
+    (paths.coupled / f"run_{k}" / "branchingData_0.csv").write_text(csv_src.read_text())
+    (paths.coupled / f"run_{k}" / "branchingData_1.csv").write_text(csv_snk.read_text())
+    print(f"[0D] Prepared outlet run_{k}: {dst} and branchingData_1.csv")
 
 
 def outlet_stage_iter(
