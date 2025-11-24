@@ -398,9 +398,9 @@ def append_progress(paths: Paths, it: int, stats: dict, tol: float):
 def main():
     ap = argparse.ArgumentParser(description="Coupled 1D-NS <-> Darcy pipeline")
     ap.add_argument("--project-root", default=".", help="Path to src/ (contains geometry/, voronoi/, solves/)")
-    ap.add_argument("--old-1d-inlet", default="../output/Forest_Output/1D_Output/102925/Run13_20branches_1d_0d/1D_Input_Files/inlet",
+    ap.add_argument("--old-1d-inlet", default="../output/Forest_Output/1D_Output/102325/Run1_10branches_0d/1D_Input_Files/inlet",
                     help="Path to existing 1D inlet folder to seed run_0 (contains 1d_simulation_input.json)")
-    ap.add_argument("--old-1d-outlet", default="../output/Forest_Output/1D_Output/102925/Run13_20branches_1d_0d/1D_Input_Files/outlet",
+    ap.add_argument("--old-1d-outlet", default="../output/Forest_Output/1D_Output/102325/Run1_10branches_0d/1D_Input_Files/outlet",
                     help="Path to existing 1D outlet folder to seed run_0 (contains 1d_simulation_input.json)")
     ap.add_argument("--stl-file", default="../files/geometry/cermRaksha_scaled_big.stl",
                     help="Path to cermRaksha_scaled_big.stl (if omitted, will try geometry/branched_network.xdmf route)")
@@ -431,7 +431,8 @@ def main():
     update_0d.prepare_outlet_run0(
         update_0d.Paths(paths.root, paths.geometry, paths.voronoi, paths.solves, paths.coupled),
         Path(args.old_1d_inlet),
-        Path(args.old_1d_outlet)
+        Path(args.old_1d_outlet),
+        k = 0
     )
 
 

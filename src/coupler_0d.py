@@ -105,7 +105,7 @@ def _summarize_rel_err(qk: np.ndarray, qkp1: np.ndarray, eps: float) -> dict:
         "p95": float(np.percentile(rel, 95.0)),
         "count_exceed": int(np.sum(rel > 0.0)),
         "rel": rel,
-    }
+    }, np.min(qkp1), np.mean(qkp1) # may need to change this for vol-based average
 
 @dataclass
 class Paths:
@@ -292,9 +292,9 @@ def compare_q(mesh_file, paths: Paths, eps: float) -> tuple[float, dict]:
     except Exception as e:
         _die(f"Failed reading .bp files: {e}")
 
-    stats_src = _summarize_rel_err(qk_src, qkp1_src, eps)
-    stats_snk = _summarize_rel_err(qk_snk, qkp1_snk, eps)
-    return max(stats_src["max"], stats_snk["max"]), {"inlet": stats_src, "outlet": stats_snk}
+    stats_src, min_q_src, mean_q_src = _summarize_rel_err(qk_src, qkp1_src, eps)
+    stats_snk, min_q_snk, mean_q_snk = _summarize_rel_err(qk_snk, qkp1_snk, eps)
+    return max(stats_src["max"], stats_snk["max"]), {"inlet": stats_src, "outlet": stats_snk}, min_q_src, mean_q_src
 
 def update_resistances(paths: Paths, run_i: int, run_next: int):
     """
@@ -398,9 +398,9 @@ def append_progress(paths: Paths, it: int, stats: dict, tol: float):
 def main():
     ap = argparse.ArgumentParser(description="Coupled 1D-NS <-> Darcy pipeline")
     ap.add_argument("--project-root", default=".", help="Path to src/ (contains geometry/, voronoi/, solves/)")
-    ap.add_argument("--old-1d-inlet", default="../output/Forest_Output/1D_Output/102925/Run11_10branches_0d_0d/1D_Input_Files/inlet",
+    ap.add_argument("--old-1d-inlet", default="../output/Forest_Output/1D_Output/112125/Run7_500branches/1D_Input_Files/inlet",
                     help="Path to existing 1D inlet folder to seed run_0 (contains 1d_simulation_input.json)")
-    ap.add_argument("--old-1d-outlet", default="../output/Forest_Output/1D_Output/102925/Run11_10branches_0d_0d/1D_Input_Files/outlet",
+    ap.add_argument("--old-1d-outlet", default="../output/Forest_Output/1D_Output/112125/Run7_500branches/1D_Input_Files/outlet",
                     help="Path to existing 1D outlet folder to seed run_0 (contains 1d_simulation_input.json)")
     ap.add_argument("--stl-file", default="../files/geometry/cermRaksha_scaled_big.stl",
                     help="Path to cermRaksha_scaled_big.stl (if omitted, will try geometry/branched_network.xdmf route)")
@@ -431,7 +431,8 @@ def main():
     update_0d.prepare_outlet_run0(
         update_0d.Paths(paths.root, paths.geometry, paths.voronoi, paths.solves, paths.coupled),
         Path(args.old_1d_inlet),
-        Path(args.old_1d_outlet)
+        Path(args.old_1d_outlet),
+        k = 0
     )
 
 
@@ -453,7 +454,7 @@ def main():
 
         # 4) Compare q and decide
         try:
-            max_rel, stats = compare_q(mesh_file, paths, eps=1e-30)
+            max_rel, stats, min_q_src, mean_q_src = compare_q(mesh_file, paths, eps=1e-30)
         except SystemExit:
             raise
         except Exception as e:
@@ -461,8 +462,13 @@ def main():
         append_progress(paths, it=k, stats=stats, tol=args.tol)
 
         if max_rel <= args.tol:
-            print(f"[converged] max_rel={max_rel:.6f} <= tol={args.tol:.6f}. Stopping.")
-            break
+            print(f"[converged] max_rel={max_rel:.6f} <= tol={args.tol:.6f}. Checking minimum source flow...")
+            if abs(min_q_src) < 0.9*mean_q_src:
+                print(f"[update] Updating flow sources...")
+                # need to do
+            else:
+                print(f"[info] Minimum source flow {min_q_src:.6f} is sufficient.")
+                break
 
         # 5) Update resistances -> new 1D card at run_{k+1}
         if k%2 == 0:

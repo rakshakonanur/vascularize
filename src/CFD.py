@@ -68,9 +68,9 @@ class CFD:
         print("Defined in module:", getattr(TreeParameters, "__module__", "?"))
         print("Signature:", inspect.signature(TreeParameters))
         print("Source file:", inspect.getsourcefile(TreeParameters))
-        params = TreeParameters(terminal_pressure=20.0*1333.22,
-                                root_pressure=35.0*1333.22,
-                                terminal_flow=0.05/60)
+        params = TreeParameters(terminal_pressure=35.0*1333.22,
+                        root_pressure=50.0*1333.22,
+                        terminal_flow=0.03/60/num_branches)
         cerm_tree = Tree()
         cerm_tree.parameters = params
         cerm_tree.set_domain(cermSurf)
@@ -79,6 +79,8 @@ class CFD:
         cerm_tree.n_add(num_branches, threshold = 1e-1)
         cerm_tree.show(plot_domain=True)
         self.cerm_tree = cerm_tree
+        self.data = cerm_tree.data
+        self.save_data()
 
     def forest_build(self, number_of_networks,trees_per_network): # build vascular forest
         cermSurf = self.cermSurf
@@ -95,11 +97,11 @@ class CFD:
         cerm_forest = Forest(n_networks=number_of_networks, n_trees_per_network=trees_per_network) 
         cerm_forest.set_domain(cermSurf)
         params_inlet = TreeParameters(terminal_pressure=20.0*1333.22,
-                        root_pressure=35.0*1333.22,
-                        terminal_flow=0.0020/60)
+                        root_pressure=25.0*1333.22,
+                        terminal_flow=0.05/60/num_branches)
         params_outlet = TreeParameters(terminal_pressure=0.0*1333.22,
                         root_pressure=5.0*1333.22,
-                        terminal_flow=0.0020/60)
+                        terminal_flow=0.05/60/num_branches)
         # for i in range(number_of_networks):
         #     for j in range(trees_per_network[i]):
         #         cerm_forest.networks[i][j].parameters = params

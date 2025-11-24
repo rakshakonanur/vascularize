@@ -7,8 +7,10 @@ import os, subprocess, shutil
 from mpi4py import MPI
 import dolfinx as dfx
 import vtk
-from geometry import branch
-# import branch
+try:
+    from geometry import branch
+except ImportError:
+    import branch
 import logging
 logger = logging.getLogger("coupler")   # use this in your code
 logger.setLevel(logging.DEBUG)
@@ -552,23 +554,23 @@ def import_branched_mesh(branching_data_file, output_1d, geo_file="branched_netw
     outlet_coords = generate_1d_files(xdmf_file=xdmf_file, output_dir=output_1d, file_prefix=fileprefix)
     return outlet_coords
 
-def create_bioreactor_mesh(stl_file, msh_file="bioreactor.msh", xdmf_file="bioreactor.xdmf"):
+def create_bioreactor_mesh(stl_file, msh_file="bioreactor.msh", xdmf_file="bioreactor.xdmf", diric=None):
     stl_to_mesh_gmsh(stl_file, msh_file=msh_file)
     mesh_to_xdmf(msh_file=msh_file, xdmf_file=xdmf_file)
     xdmf_to_dolfinx(xdmf_file=xdmf_file)
-    # facet_tags, mesh = domain_mesh_tagging_nearest(xdmf_file=xdmf_file, coords=diric)
-    # convert_vertex_tags_to_facet_tags(mesh = mesh, vertex_tags=facet_tags)
+    facet_tags, mesh = domain_mesh_tagging_nearest(xdmf_file=xdmf_file, coords=diric)
+    convert_vertex_tags_to_facet_tags(mesh = mesh, vertex_tags=facet_tags)
 
 
 class Files():
     def __init__(self, stl_file, output_1d_inlet, output_1d_outlet, branching_data_inlet, branching_data_outlet, init = True, single=True):
         if single:
-            _ = import_branched_mesh(branching_data_inlet, output_1d_inlet, inlet = True)
+            diric = import_branched_mesh(branching_data_inlet, output_1d_inlet, inlet = True)
         else:
-            _ = import_branched_mesh(branching_data_inlet, output_1d_inlet, geo_file="branched_network_inlet.geo", msh_file="branched_network_inlet.msh", xdmf_file="branched_network_inlet.xdmf", fileprefix="_inlet")
+            diric = import_branched_mesh(branching_data_inlet, output_1d_inlet, geo_file="branched_network_inlet.geo", msh_file="branched_network_inlet.msh", xdmf_file="branched_network_inlet.xdmf", fileprefix="_inlet")
             _ = import_branched_mesh(branching_data_outlet, output_1d_outlet, geo_file="branched_network_outlet.geo", msh_file="branched_network_outlet.msh", xdmf_file="branched_network_outlet.xdmf", fileprefix="_outlet")
         if init:
-            create_bioreactor_mesh(stl_file)
+            create_bioreactor_mesh(stl_file, diric=diric)
         self.D_value = 1e-2  # Diffusion coefficient
         self.element_degree = 1  # Polynomial degree for finite elements
         self.write_output = True  # Whether to write output files   
@@ -579,10 +581,10 @@ if __name__ == "__main__":
     # perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/syntheticVasculature/files/geometry/cermRaksha_scaled.stl",
     #                             branching_data_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/090425/Run2_50branches/1D_Input_Files/branchingData.csv")
     perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/vascularize/files/geometry/cermRaksha_scaled_big.stl",
-                                output_1d_inlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/103025/Run1_1branches/1D_Input_Files/inlet",
-                                output_1d_outlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/103025/Run1_1branches/1D_Input_Files/outlet",
-                                branching_data_inlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/103025/Run1_1branches/branchingData_0.csv",
-                                branching_data_outlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/103025/Run1_1branches/branchingData_1.csv",
+                                output_1d_inlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/112125/Run7_500branches/1D_Input_Files/inlet",
+                                output_1d_outlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/112125/Run7_500branches/1D_Input_Files/outlet",
+                                branching_data_inlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/112125/Run7_500branches/branchingData_0.csv",
+                                branching_data_outlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/112125/Run7_500branches/branchingData_1.csv",
                                 single=False,
                                 init=True
                                 )
