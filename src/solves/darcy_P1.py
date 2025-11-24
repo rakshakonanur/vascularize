@@ -370,22 +370,35 @@ def single_compartment(self, source_pressures, sink_pressures):
     Psnk_avg = np.mean(Psnk_values)
     print(f"Average pressure at outlets: {Psrc_avg}", flush=True)
 
-    # beta_src = (Q_bio / V_bio) * (1/(Psrc_avg -Pcap)) # Source term coefficient
-    # beta_snk = (Q_bio / V_bio) * (1/(Pcap - Psnk_avg))  # Sink term coefficient
+    vols   = _cell_volumes_Q0(self.mesh)
+    uniq_tags_local = np.unique(self.inlet_cell_tags.values.astype(int))
+    territory_vols = np.zeros(uniq_tags_local.max()+1)  # assuming tags are 0-indexed and contiguous
+    DG = dfx.fem.functionspace(self.mesh, element("DG", self.mesh.basix_cell(), 0))
+    beta_src = fem.Function(DG)
+    beta_snk = fem.Function(DG)
 
-    beta_src = (metabolic_demand) * (1/(Psrc_avg -Pcap)) # Source term coefficient
-    beta_snk = (metabolic_demand) * (1/(Pcap - Psnk_avg))  # Sink term coefficient
+    for tag in np.unique(self.inlet_cell_tags.values).astype(int):
+        mask = (self.inlet_cell_tags.values == int(tag))
+        local_cells = self.inlet_cell_tags.indices[mask]
+        territory_vols[tag] = vols[local_cells].sum()
+        # beta_src.x.array[local_cells] = Q_bio / territory_vols[tag] / (uniq_tags_local.max() + 1) * (1/(Psrc_avg - Pcap)) # set metabolic demand per territory
+        beta_src.x.array[local_cells] = Q_bio / V_bio * (1/(Psrc_avg - Pcap)) # set metabolic demand per territory
 
-    # Psnk_c = dfx.fem.Constant(self.mesh, PETSc.ScalarType(Psnk))
-    beta_src_c = dfx.fem.Constant(self.mesh, PETSc.ScalarType(beta_src))
-    beta_snk_c = dfx.fem.Constant(self.mesh, PETSc.ScalarType(beta_snk))
+    for tag in np.unique(self.outlet_cell_tags.values).astype(int):
+        mask = (self.outlet_cell_tags.values == int(tag))
+        local_cells = self.outlet_cell_tags.indices[mask]
+        territory_vols[tag] = vols[local_cells].sum()
+        # beta_snk.x.array[local_cells] = Q_bio / territory_vols[tag] / (uniq_tags_local.max() + 1) * (1/(Pcap - Psnk_avg)) # set metabolic demand per territory
+        beta_snk.x.array[local_cells] = Q_bio / V_bio * (1/(Pcap - Psnk_avg)) # set metabolic demand per territory
 
-    # If initializing, save these values to a file for later reference
-    with open(current_dir/"perfusion_parameters.txt", "w") as f:
-        f.write(f"beta_src (1/s): {beta_src}\n")
-        f.write(f"beta_snk (1/s): {beta_snk}\n")
+    # beta_src.x.array[:] = (metabolic_demand) * (1/(Psrc_avg -Pcap)) # Source term coefficient
+    # beta_snk.x.array[:] = (metabolic_demand) * (1/(Pcap - Psnk_avg))  # Sink term coefficient
 
-    return beta_src_c, beta_snk_c
+    np.savez(current_dir / "perfusion_parameters.npz",
+         beta_src=beta_src.x.array,
+         beta_snk=beta_snk.x.array)
+
+    return beta_src, beta_snk
 
 class PerfusionSolver:
     def __init__(self, mesh_inlet_file: str, mesh_outlet_file: str, pres_inlet_file: str, pres_outlet_file: str, flow_inlet_file: str, flow_outlet_file: str):
@@ -398,7 +411,7 @@ class PerfusionSolver:
         self.p_src = import_pressure_data(self, pres_inlet_file, k=self.element_degree)
         self.p_snk = import_pressure_data(self, pres_outlet_file, k=self.element_degree)
         self.flow = import_flow_data(self, flow_inlet_file, self.inlet_cell_tags) # + import_flow_data(self, flow_outlet_file, self.outlet_cell_tags)
-        print(f"Total flow rate from both inlet and outlet: {self.flow} cm^3/s", flush=True)
+        print(f"Total flow rate from inlet: {self.flow} cm^3/s", flush=True)
         
 
     def setup(self, init=True):
@@ -415,7 +428,7 @@ class PerfusionSolver:
         W = dfx.fem.functionspace(self.mesh, P_el) # Pressure function space
         V = dfx.fem.functionspace(self.mesh, u_el) # Velocity function space
 
-        kappa = 2e-5 / 10 # convert from cm^2/(Pa s) to cm^2/(dyne s)
+        kappa = 1e-8 # convert from cm^2/(Pa s) to cm^2/(dyne s)
         mu = 1
         kappa_over_mu = fem.Constant(self.mesh, dfx.default_scalar_type(kappa/mu))
         phi = fem.Constant(self.mesh, dfx.default_scalar_type(1)) # Porosity of the medium, ranging from 0 to 1
@@ -428,19 +441,16 @@ class PerfusionSolver:
         if init:
             beta_src, beta_snk = single_compartment(self, self.p_src, self.p_snk) # Source and sink terms
         else:
-            with open(current_dir/"perfusion_parameters.txt", "r") as f:
-                lines = f.readlines()
-                beta_src_value = float(lines[0].split(":")[1].strip())
-                beta_snk_value = float(lines[1].split(":")[1].strip())
-            beta_src = dfx.fem.Constant(self.mesh, PETSc.ScalarType(beta_src_value))
-            beta_snk = dfx.fem.Constant(self.mesh, PETSc.ScalarType(beta_snk_value))
-            Psnk = dfx.fem.Constant(self.mesh, PETSc.ScalarType(0.0))
-        
-        Psnk = dfx.fem.Constant(self.mesh, PETSc.ScalarType(0.0))
+            DG = dfx.fem.functionspace(self.mesh, element("DG", self.mesh.basix_cell(), 0))
+            beta_src = dfx.fem.Function(DG)
+            beta_snk = dfx.fem.Function(DG)
+            data = np.load(current_dir / "perfusion_parameters.npz")
+            beta_src.x.array[:] = data["beta_src"]; beta_snk.x.array[:] = data["beta_snk"]
+
         print(f"Length of p_src:", len(self.p_src[-1].x.array), flush=True)
         print(f"Mean of p_src:", np.mean(self.p_src[-1].x.array), flush=True)
-        print(f"Beta_src (1/s): {float(beta_src.value)}", flush=True)
-        print(f"Beta_snk (1/s): {float(beta_snk.value)}", flush=True)
+        # print(f"Beta_src (1/s): {float(beta_src.value)}", flush=True)
+        # print(f"Beta_snk (1/s): {float(beta_snk.value)}", flush=True)
         fLHS = p * (beta_snk + beta_src) 
         fRHS = beta_src * self.p_src[-1] + beta_snk * self.p_snk[-1]
         # fRHS = beta_src * self.p_src[-1] + beta_snk * Psnk
@@ -499,7 +509,7 @@ class PerfusionSolver:
         vtkfile = VTKFile(MPI.COMM_WORLD, "u.vtu", "w")
 
         # Write the function to the VTK file
-        vtkfile.write_function(vel_f)
+        vtkfile.write_function(u_interp)
 
 class Projector():
     def __init__(self, V):
