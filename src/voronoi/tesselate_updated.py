@@ -619,8 +619,8 @@ def terminal_outflow(
 if __name__ == "__main__":
     # Optional CLI defaults; change these paths as needed
     import os
-    csv_inlet_path   = os.environ.get("SEEDS_INLET_CSV", "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/102925/Run11_10branches_0d_0d/branchingData_0.csv")
-    csv_outlet_path  = os.environ.get("SEEDS_OUTLET_CSV", "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/102925/Run11_10branches_0d_0d/branchingData_1.csv") 
+    csv_inlet_path   = os.environ.get("SEEDS_INLET_CSV", "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/102925/Run13_20branches_0d_0d_optimized/branchingData_0.csv")
+    csv_outlet_path  = os.environ.get("SEEDS_OUTLET_CSV", "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/102925/Run13_20branches_0d_0d_optimized/branchingData_1.csv") 
     terr_inlet_xdmf  = os.environ.get("TERRITORIES_INLET_XDMF", "territories_inlet.xdmf")
     terr_outlet_xdmf = os.environ.get("TERRITORIES_OUTLET_XDMF", "territories_outlet.xdmf") 
     mesh_inlet_bp    = os.environ.get("MESH_INLET_BP", "../geometry/tagged_branches_inlet.bp")
@@ -669,13 +669,13 @@ if __name__ == "__main__":
         mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
 
     labels_local, uniq = label_cells_by_laguerre(mesh, inlet_seed_points_for_laguerre, inlet_seed_diameters,
-                                                 weight_mode="d2", kappa=1.0)
+                                                 weight_mode="d2", kappa=0.0)
     cell_tags = make_cell_meshtags(mesh, labels_local)
     # (optional) write territories:
     write_territories(mesh, cell_tags, terr_inlet_xdmf)
 
     labels_local, uniq = label_cells_by_laguerre(mesh, outlet_seed_points_for_laguerre, outlet_seed_diameters,
-                                                 weight_mode="d2", kappa=1.0)
+                                                 weight_mode="d2", kappa=0.0)
     cell_tags = make_cell_meshtags(mesh, labels_local)
     # (optional) write territories:
     write_territories(mesh, cell_tags, terr_outlet_xdmf)
