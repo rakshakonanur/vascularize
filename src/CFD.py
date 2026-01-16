@@ -96,12 +96,12 @@ class CFD:
         folder = self.parameters['outdir'] + os.sep + self.parameters['folder'] + os.sep
         cerm_forest = Forest(n_networks=number_of_networks, n_trees_per_network=trees_per_network) 
         cerm_forest.set_domain(cermSurf)
-        params_inlet = TreeParameters(terminal_pressure=20.0*1333.22,
-                        root_pressure=25.0*1333.22,
-                        terminal_flow=0.05/60/num_branches)
+        params_inlet = TreeParameters(terminal_pressure=5.0*1333.22,
+                        root_pressure=6.50*1333.22,
+                        terminal_flow=0.00036/60/num_branches)
         params_outlet = TreeParameters(terminal_pressure=0.0*1333.22,
-                        root_pressure=5.0*1333.22,
-                        terminal_flow=0.05/60/num_branches)
+                        root_pressure=1.0*1333.22,
+                        terminal_flow=0.00036/60/num_branches)
         # for i in range(number_of_networks):
         #     for j in range(trees_per_network[i]):
         #         cerm_forest.networks[i][j].parameters = params
@@ -147,7 +147,7 @@ class CFD:
         else:
             edit_flows = True
 
-        if modify_bc:
+        if treeID ==  1 and modify_bc:
             from convert_0d_bc import transform_flow_to_pressure_inlet_and_flow_outlets
             data = json.load(open(os.path.join(outdir,folder,"solver_0d.in")))
 
@@ -158,6 +158,21 @@ class CFD:
                 P_series=P,
                 t_series=t,
                 Q_series_for_outlets=Q,
+                edit_flows=edit_flows
+            )
+
+            # Save
+            Path(outdir + os.sep + folder + os.sep + "solver_0d_new.in").write_text(json.dumps(new_data, indent=4))
+            print("Wrote solver_new.in")
+        elif treeID == 0 and modify_bc:
+            from convert_0d_bc import transform_resistance_to_pressure_outlets
+            data = json.load(open(os.path.join(outdir,folder,"solver_0d.in")))
+
+            # Transform
+            new_data = transform_resistance_to_pressure_outlets(
+                data=data,
+                P_series_for_outlets=P,
+                t_series=t,
                 edit_flows=edit_flows
             )
 
