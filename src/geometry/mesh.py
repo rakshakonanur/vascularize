@@ -139,13 +139,12 @@ def convert_mesh(msh_file, xdmf_file):
     # Write to XDMF
     line_mesh.write(current_dir/xdmf_file)
 
-def branch_mesh_tagging(mesh):
-    
+def branch_mesh_tagging(mesh, inlet=np.array([0,0.41,0.34])):
+
     fdim = mesh.topology.dim - 1
 
     mesh.topology.create_connectivity(fdim, mesh.topology.dim)
     boundary_facets_indices = dfx.mesh.exterior_facet_indices(mesh.topology)
-    inlet = np.array([0,0.41,0.34]) #updated with units
     tol = 1e-6
 
     def near_inlet(x):
@@ -252,7 +251,7 @@ def convert_vertex_tags_to_facet_tags(mesh, vertex_tags):
                 mesh.geometry
             )
 
-def generate_1d_files(xdmf_file, output_dir, file_prefix=None):
+def generate_1d_files(xdmf_file, output_dir, file_prefix=None, inlet_coords=np.array([0,0.41,0.34])):
 
     # Load the converted XDMF mesh
     with XDMFFile(MPI.COMM_WORLD, current_dir/xdmf_file, "r") as xdmf:
@@ -267,14 +266,15 @@ def generate_1d_files(xdmf_file, output_dir, file_prefix=None):
     velocity_fn = dfx.fem.Function(P1vec)
     pressure_fn = dfx.fem.Function(P1)
     flow_fn = dfx.fem.Function(P1)
+    area_fn = dfx.fem.Function(P1)
 
-    centerlineVel, centerlineFlow, pressure, centerlineCoords = load_vtp(output_dir)
+    centerlineVel, centerlineFlow, pressure, centerlineCoords, area = load_vtp(output_dir)
     Nt = len(centerlineFlow)  # Number of timesteps
 
     fdim = mesh.topology.dim - 1
 
     mesh.topology.create_connectivity(fdim, mesh.topology.dim)
-    outlet_coords, facet_tag = branch_mesh_tagging(mesh)
+    outlet_coords, facet_tag = branch_mesh_tagging(mesh, inlet=inlet_coords)
 
     # If file exists, remove it
     if (current_dir / f"tagged_branches{file_prefix}.bp").exists():
@@ -300,9 +300,13 @@ def generate_1d_files(xdmf_file, output_dir, file_prefix=None):
     vtx_flow = dfx.io.VTXWriter(
         MPI.COMM_WORLD, current_dir/f"flow{file_prefix}.bp", [flow_fn], engine="BP4"
     )
+    vtx_area = dfx.io.VTXWriter(
+        MPI.COMM_WORLD, current_dir/f"area{file_prefix}.bp", [area_fn], engine="BP4"
+    )
     vtx_vel.write(0.0)
     vtx_pres.write(0.0)
     vtx_flow.write(0.0)
+    vtx_area.write(0.0)
     # adios4dolfinx.write_mesh(Path("velocity.bp"), mesh, engine="BP4")
     # adios4dolfinx.write_mesh(Path("pressure.bp"), mesh, engine="BP4")
     # Commenting out nearest neighbor search
@@ -316,6 +320,8 @@ def generate_1d_files(xdmf_file, output_dir, file_prefix=None):
         send2trash(current_dir / f"pressure_checkpoint{file_prefix}.bp")
     if (current_dir / f"flow_checkpoint{file_prefix}.bp").exists():
         send2trash(current_dir / f"flow_checkpoint{file_prefix}.bp")
+    if (current_dir / f"area_checkpoint{file_prefix}.bp").exists():
+        send2trash(current_dir / f"area_checkpoint{file_prefix}.bp")
 
     for i in range(Nt):
         time = i * dt
@@ -323,6 +329,7 @@ def generate_1d_files(xdmf_file, output_dir, file_prefix=None):
         scalar_velocity = centerlineVel[time]  # Get the velocity for the current timestep
         scalar_flow = centerlineFlow[time]  # Get the flow for the current timestep
         scalar_pressure = pressure[time]  # Get the pressure for the current timestep
+        scalar_area = area  # Area is constant across timesteps
 
         if tree is None:
             tree = cKDTree(points)
@@ -332,6 +339,7 @@ def generate_1d_files(xdmf_file, output_dir, file_prefix=None):
         interpolated_velocity = scalar_velocity[indices]
         interpolated_pressure = scalar_pressure[indices]
         interpolated_flow = scalar_flow[indices]
+        interpolated_area = scalar_area[indices]
 
         # Compute tangents using the next connected point
         tangents = np.zeros((len(indices), 3))
@@ -348,6 +356,7 @@ def generate_1d_files(xdmf_file, output_dir, file_prefix=None):
         velocity_fn.x.array[:] = (interpolated_velocity[:, np.newaxis] * tangents).flatten()
         pressure_fn.x.array[:] = interpolated_pressure
         flow_fn.x.array[:] = interpolated_flow
+        area_fn.x.array[:] = interpolated_area
 
         adios4dolfinx.write_function(
             Path(current_dir / f"velocity_checkpoint{file_prefix}.bp"),
@@ -364,15 +373,22 @@ def generate_1d_files(xdmf_file, output_dir, file_prefix=None):
             u = flow_fn,
             time=float(time),
             name="f")
+        adios4dolfinx.write_function(
+            Path(current_dir / f"area_checkpoint{file_prefix}.bp"),
+            u = area_fn,
+            time=float(time),
+            name="f")
 
         # --- Write data to file with time stamp ---
         vtx_vel.write(float(time))
         vtx_pres.write(float(time))
         vtx_flow.write(float(time))
+        vtx_area.write(float(time))
 
     vtx_vel.close()
     vtx_pres.close()
     vtx_flow.close()
+    vtx_area.close()
 
     return outlet_coords
 
@@ -435,7 +451,6 @@ def load_vtp(directory):
 
 
         area = timestep_data["point_data"]["Area"]  # (N,)
-        area = timestep_data["point_data"]["Area"]  # (N,)
         flowrate_1d = timestep_data["point_data"]["Flowrate"]  # (N,)
         pressure_1d = timestep_data["point_data"]["Pressure_mmHg"]  # (N,)
         mesh_3d_coords = timestep_data["coords"]  # (N, 3)
@@ -449,8 +464,10 @@ def load_vtp(directory):
         pressure.append(pressure_1d[::points_per_section]) # save the pressure values for each timestep in each row
         centerlineCoords = mesh_3d_coords.reshape(-1, points_per_section, 3).mean(axis=1)
 
+        area = area[::points_per_section]  # save only one point for each cross-section
 
-    return centerlineVel, centerlineFlow, pressure, centerlineCoords
+
+    return centerlineVel, centerlineFlow, pressure, centerlineCoords, area
 
 
 def domain_mesh_tagging(mesh, coords, tag_value=1, tol=5e-3):
@@ -496,62 +513,92 @@ from scipy.spatial import cKDTree
 
 def domain_mesh_tagging_nearest(xdmf_file, coords):
     """
-    Tag the nearest vertex in the mesh to each coordinate in coords.
+    Tag the nearest INTERIOR vertex in the mesh to each coordinate in coords.
 
     Parameters:
-        mesh (dolfinx.mesh.Mesh): The mesh object
+        xdmf_file (str or Path): Path to the mesh XDMF file
         coords (np.ndarray): An (N, 3) array of target points
-        tag_value (int): The marker value to assign
 
     Returns:
         dolfinx.mesh.meshtags: Vertex tags
+        dolfinx.mesh.Mesh:    Mesh
     """
+    from dolfinx.io import XDMFFile
+    from dolfinx import mesh as dfx_mesh
 
-    with XDMFFile(MPI.COMM_WORLD, current_dir/xdmf_file, "r") as xdmf:
+    # ------------------------------------------------------------------
+    # 1. Load mesh
+    # ------------------------------------------------------------------
+    with XDMFFile(MPI.COMM_WORLD, current_dir / xdmf_file, "r") as xdmf:
         mesh = xdmf.read_mesh(name="Grid")
-    
-    mesh.topology.create_connectivity(0, mesh.topology.dim)
-    mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
 
-    vdim = 0  # Vertex dimension
-    fdim = mesh.topology.dim - 1  # Facet dimension
+    tdim = mesh.topology.dim
+    vdim = 0  # vertex dimension
+
+    # Connectivity needed for boundary detection
+    mesh.topology.create_connectivity(vdim, tdim)
+
+    # ------------------------------------------------------------------
+    # 2. Find boundary vertices and define "interior" set
+    # ------------------------------------------------------------------
+    # All boundary vertices (dimension 0 on the exterior boundary)
+    boundary_vertices = dfx_mesh.locate_entities_boundary(
+        mesh,
+        vdim,
+        lambda x: np.full(x.shape[1], True, dtype=bool)
+    )
+    boundary_vertices = np.unique(boundary_vertices)
+
     mesh_coords = mesh.geometry.x
+    num_vertices = mesh_coords.shape[0]
 
-    # Build KDTree from mesh coordinates
-    tree = cKDTree(mesh_coords)
-    distances, vertex_indices = tree.query(coords)
+    is_boundary = np.zeros(num_vertices, dtype=bool)
+    is_boundary[boundary_vertices] = True
+
+    interior_vertices = np.where(~is_boundary)[0]
+
+    if interior_vertices.size == 0:
+        raise RuntimeError("No interior vertices found in the mesh.")
+
+    # ------------------------------------------------------------------
+    # 3. Build KDTree on interior vertices only and query
+    # ------------------------------------------------------------------
+    tree = cKDTree(mesh_coords[interior_vertices])
+    distances, local_indices = tree.query(coords)
+    # Map back to global vertex indices
+    vertex_indices = interior_vertices[local_indices]
 
     # Remove duplicates (optional)
     unique_vertex_indices = np.unique(vertex_indices)
 
-    # Create tags
+    # ------------------------------------------------------------------
+    # 4. Create meshtags for these interior vertices
+    # ------------------------------------------------------------------
     tags = np.full_like(unique_vertex_indices, OUTLET, dtype=np.int32)
-    vertex_tags = dfx.mesh.meshtags(mesh, vdim, unique_vertex_indices, tags)
+    vertex_tags = dfx_mesh.meshtags(mesh, vdim, unique_vertex_indices, tags)
 
-    print("Nearest tagged vertex indices:", unique_vertex_indices, flush=True)
+    print("Nearest INTERIOR tagged vertex indices:", unique_vertex_indices, flush=True)
     print("Vertex coordinates:", mesh_coords[unique_vertex_indices], flush=True)
 
-    # Ensure vertex-to-cell connectivity for writing
-    mesh.topology.create_connectivity(0, mesh.topology.dim)
-
-    # Write to file
-    with dfx.io.XDMFFile(mesh.comm, current_dir/xdmf_file, "w") as xdmf:
+    # ------------------------------------------------------------------
+    # 5. Write mesh + tags back to file
+    # ------------------------------------------------------------------
+    with dfx.io.XDMFFile(mesh.comm, current_dir / xdmf_file, "w") as xdmf:
         xdmf.write_mesh(mesh)
         xdmf.write_meshtags(vertex_tags, mesh.geometry)
 
-        print(f"Total facets: {mesh.topology.index_map(fdim).size_local}")
-        print(f"Tagged facets: {vertex_tags.indices.size}")
-
+        print(f"Total vertices: {num_vertices}")
+        print(f"Tagged vertices: {vertex_tags.indices.size}")
 
     return vertex_tags, mesh
 
-def import_branched_mesh(branching_data_file, output_1d, geo_file="branched_network.geo", msh_file="branched_network.msh", xdmf_file="branched_network.xdmf", fileprefix=""):
+def import_branched_mesh(branching_data_file, output_1d, geo_file="branched_network.geo", msh_file="branched_network.msh", xdmf_file="branched_network.xdmf", fileprefix="", coords=np.array([0,0.41,0.34])):
     df = pd.read_csv(branching_data_file)
     branch.write_geo_from_branching_data(df, geo_file=geo_file)
     geo_to_mesh_gmsh(geo_file=geo_file, msh_file=msh_file)
     convert_mesh(msh_file=msh_file, xdmf_file=xdmf_file)
     xdmf_to_dolfinx(xdmf_file=xdmf_file)
-    outlet_coords = generate_1d_files(xdmf_file=xdmf_file, output_dir=output_1d, file_prefix=fileprefix)
+    outlet_coords = generate_1d_files(xdmf_file=xdmf_file, output_dir=output_1d, file_prefix=fileprefix, inlet_coords=coords)
     return outlet_coords
 
 def create_bioreactor_mesh(stl_file, msh_file="bioreactor.msh", xdmf_file="bioreactor.xdmf", diric=None):
@@ -568,12 +615,10 @@ class Files():
             diric = import_branched_mesh(branching_data_inlet, output_1d_inlet, inlet = True)
         else:
             diric = import_branched_mesh(branching_data_inlet, output_1d_inlet, geo_file="branched_network_inlet.geo", msh_file="branched_network_inlet.msh", xdmf_file="branched_network_inlet.xdmf", fileprefix="_inlet")
-            _ = import_branched_mesh(branching_data_outlet, output_1d_outlet, geo_file="branched_network_outlet.geo", msh_file="branched_network_outlet.msh", xdmf_file="branched_network_outlet.xdmf", fileprefix="_outlet")
+            _ = import_branched_mesh(branching_data_outlet, output_1d_outlet, geo_file="branched_network_outlet.geo", msh_file="branched_network_outlet.msh", xdmf_file="branched_network_outlet.xdmf", fileprefix="_outlet", coords=np.array([0,-0.41,0.34]))
         if init:
             create_bioreactor_mesh(stl_file, diric=diric)
-        self.D_value = 1e-2  # Diffusion coefficient
-        self.element_degree = 1  # Polynomial degree for finite elements
-        self.write_output = True  # Whether to write output files   
+   
 
 
 
@@ -581,10 +626,10 @@ if __name__ == "__main__":
     # perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/syntheticVasculature/files/geometry/cermRaksha_scaled.stl",
     #                             branching_data_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/090425/Run2_50branches/1D_Input_Files/branchingData.csv")
     perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/vascularize/files/geometry/cermRaksha_scaled_big.stl",
-                                output_1d_inlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/112125/Run7_500branches/1D_Input_Files/inlet",
-                                output_1d_outlet = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/112125/Run7_500branches/1D_Input_Files/outlet",
-                                branching_data_inlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/112125/Run7_500branches/branchingData_0.csv",
-                                branching_data_outlet="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/112125/Run7_500branches/branchingData_1.csv",
+                                output_1d_inlet = "/Users/rakshakonanur/Documents/Research/vascularize/src/coupled/run_49/inlet",
+                                output_1d_outlet = "/Users/rakshakonanur/Documents/Research/vascularize/src/coupled/run_49/outlet",
+                                branching_data_inlet="/Users/rakshakonanur/Documents/Research/vascularize/src/coupled/run_0/branchingData_0.csv",
+                                branching_data_outlet="/Users/rakshakonanur/Documents/Research/vascularize/src/coupled/run_0/branchingData_1.csv",
                                 single=False,
                                 init=True
                                 )
