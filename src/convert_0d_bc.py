@@ -125,6 +125,40 @@ def transform_flow_to_pressure_inlet_and_flow_outlets(
     data_out["boundary_conditions"] = bc_list
     return data_out
 
+def transform_resistance_to_pressure_outlets(
+    data: Dict[str, Any],
+    P_series_for_outlets: List[float],
+    t_series: List[float],
+    edit_flows: bool = True,
+) -> Dict[str, Any]:
+    bc_list = list(data.get("boundary_conditions", []))
+    name_to_idx = _bc_index_by_name(data)
+
+    # 1) Identify inlet bc name from vessel mapping
+    old_inlet_name = _find_inlet_bc_name(data)
+    if old_inlet_name not in name_to_idx:
+        raise ValueError(f"Inlet BC '{old_inlet_name}' not present in boundary_conditions list.")
+
+    # 2) Update/rename inlet BC to PRESSURE with P-series
+    i = name_to_idx[old_inlet_name]
+
+    # 3) Convert all RESISTANCE outlets to PRESSURE with P-series and same t-series
+    if edit_flows:
+        for j, bc in enumerate(bc_list):
+            if j == i:
+                continue
+            bctype = bc.get("bc_type", "").upper()
+            if bctype == "RESISTANCE":
+                bc = dict(bc)
+                bc["bc_type"] = "PRESSURE"
+                bc["bc_values"] = {"P": P_series_for_outlets, "t": t_series}
+                # Preserve name and any non-values keys; drop resistance-specific keys if present under bc_values
+                bc_list[j] = bc
+
+    data_out = dict(data)
+    data_out["boundary_conditions"] = bc_list
+    return data_out
+
 
 # -------------------------
 # CLI
