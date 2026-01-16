@@ -304,7 +304,7 @@ class PerfusionSolver:
         self.ds = Measure("ds", self.mesh, metadata={"quadrature_degree": deg}) # Facet integrals
         n = FacetNormal(self.mesh) # Normal vector on facets
 
-        kappa = 2e-5 / 10 # convert from cm^2/(Pa s) to cm^2/(dyne s)
+        kappa = 2e-8 / 10 # convert from cm^2/(Pa s) to cm^2/(dyne s)
         mu = 1
         kappa_over_mu = dfx.default_scalar_type(kappa/mu)
         Kinv  = fem.Constant(self.mesh, kappa_over_mu**-1)
@@ -402,10 +402,10 @@ class PerfusionSolver:
         vtkfile.write_function(u_proj)
 
 if __name__ == "__main__":
-    mesh_file = "../voronoi/territories.xdmf"
+    mesh_file = "../voronoi/territories_inlet.xdmf"
     pres_inlet_file = "../voronoi/p_src_inlet_series.bp"
     pres_outlet_file = "../voronoi/p_src_outlet_series.bp"
-    flow_file = "../voronoi/q_src_series.bp"
+    flow_file = "../voronoi/q_src_inlet_series.bp"
     solver = PerfusionSolver(mesh_file, pres_inlet_file, pres_outlet_file, flow_file)
     solver.setup(init=True)
     print("Perfusion solve complete.")

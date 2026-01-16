@@ -390,7 +390,7 @@ def plot_volumes_overlay(volumes_list, v_target, out_png, mode="kde", labels=Non
 def main():
     ap = argparse.ArgumentParser(description="Equal-volume territories by moving outlet endpoints + full geom.csv export")
     ap.add_argument("--mesh-xdmf", default = "../geometry/bioreactor.xdmf", type=Path)
-    ap.add_argument("--branching-csv", default = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/112125/Run4_20branches_0d_0d/branchingData_1.csv", type=Path)
+    ap.add_argument("--branching-csv", default = "/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/120325/Run1_5branches_0d_0d/branchingData_1.csv", type=Path)
     ap.add_argument("--out-csv", default ="./branchingData_1.csv", type=Path)
     ap.add_argument("--write-territories", type=Path, default="./territories.xdmf",)
     ap.add_argument("--geom-csv", type=Path, default="./geom.csv",
